@@ -6,7 +6,7 @@
   <title>WC26 Predictions</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
@@ -2027,6 +2027,7 @@ function App() {
         saveStatus={saveStatus}
         userProfile={profiles[currentUser] || null}
         locked={locked}
+        predictions={predictions}
       />
       {locked && view !== 'admin' && (
         <div style={{ background: 'var(--burgundy)', color: 'white', textAlign: 'center', padding: '8px 16px', fontSize: 13, fontWeight: 600, letterSpacing: '0.04em' }}>
@@ -2277,7 +2278,67 @@ function LoginScreen({ onLogin, participants, profiles }) {
 // HEADER / NAV
 // ──────────────────────────────────────────────────────────────────────
 
-function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked }) {
+function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked, predictions }) {
+  // Compute completion status for each tab
+  const completion = useMemo(() => {
+    const p = predictions || {};
+    const group = p.group || {};
+    const ko = p.ko || {};
+    const bonus = p.bonus || {};
+    const joker = p.joker || {};
+
+    // Group: all 72 matches have scores AND joker picks set (joker lives on this tab)
+    const groupDone = GROUP_MATCHES.every(m => {
+      const r = group[m.id];
+      return r && r.h !== '' && r.h != null && r.a !== '' && r.a != null;
+    }) && !!(joker.team && joker.group);
+
+    // Knockout: all 32 KO matches (73-104) have scores
+    // Only count matches where teams are known (bracket derived from group picks)
+    const { bracket } = buildBracket(group, ko);
+    const koDone = groupDone && range(73, 104).every(mId => {
+      const m = bracket[mId];
+      if (!m?.home || !m?.away) return true; // slot not yet derivable, skip
+      const r = ko[mId];
+      if (!r || r.h === '' || r.h == null || r.a === '' || r.a == null) return false;
+      // Check draw has pk winner
+      if (parseInt(r.h) === parseInt(r.a) && !r.pkWinner) return false;
+      return true;
+    });
+
+    // Bonus: winner, runnerUp, thirdPlace, goldenBoot, tiebreak (joker handled in Group tab)
+    const bonusDone = !!(
+      bonus.winner && bonus.runnerUp && bonus.thirdPlace &&
+      bonus.goldenBoot && bonus.tiebreak
+    );
+
+    return { groupDone, koDone, bonusDone };
+  }, [predictions]);
+
+  const doneStyle = { color: 'var(--forest)', fontWeight: 700 };
+  const doneIndicator = <span style={{ color: 'var(--forest)', marginLeft: 3, fontSize: 10 }}>✓</span>;
+    <header style={{ borderBottom: '1px solid var(--line)', background: 'var(--paper)', position: 'sticky', top: 0, zIndex: 10 }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="micro-caps" style={{ marginBottom: -2 }}>FIFA World Cup 26</div>
+          <div className="display" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.1 }}>
+            Predictions <em style={{ fontStyle: 'italic', color: 'var(--burgundy)' }}>Pool</em>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+          {saveStatus === 'saving' && <span className="pill"><RefreshCw size={11} /> Saving</span>}
+          {saveStatus === 'saved' && <span className="pill pill-success"><Check size={11} /> Saved</span>}
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{user}</div>
+            {userProfile && (
+              <div style={{ fontSize: 11, color: 'var(--ink-soft)' }}>{userProfile.team} · {userProfile.country}</div>
+            )}
+          </div>
+          <button className="btn-ghost" style={{ background: 'none', border: 'none', padding: 6, color: 'var(--ink-soft)' }} onClick={onLogout} title="Sign out">
+            <LogOut size={16} />
+          </button>
+        </div>
+      </div>
   return (
     <header style={{ borderBottom: '1px solid var(--line)', background: 'var(--paper)', position: 'sticky', top: 0, zIndex: 10 }}>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2302,14 +2363,26 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
         </div>
       </div>
       <nav className="scrollbar" style={{ maxWidth: 1100, margin: '0 auto', padding: '0 8px', display: 'flex', gap: 0, overflowX: 'auto' }}>
-        <button className={`tab-btn ${view === 'predictions' ? 'active' : ''}`} onClick={() => setView('predictions')}>
-          <Calendar size={14} /> Group Stage
+        <button
+          className={`tab-btn ${view === 'predictions' ? 'active' : ''}`}
+          onClick={() => setView('predictions')}
+          style={completion.groupDone && view !== 'predictions' ? doneStyle : {}}
+        >
+          <Calendar size={14} /> Group Stage{completion.groupDone && doneIndicator}
         </button>
-        <button className={`tab-btn ${view === 'bracket' ? 'active' : ''}`} onClick={() => setView('bracket')}>
-          <Trophy size={14} /> Knockout
+        <button
+          className={`tab-btn ${view === 'bracket' ? 'active' : ''}`}
+          onClick={() => setView('bracket')}
+          style={completion.koDone && view !== 'bracket' ? doneStyle : {}}
+        >
+          <Trophy size={14} /> Knockout{completion.koDone && doneIndicator}
         </button>
-        <button className={`tab-btn ${view === 'bonus' ? 'active' : ''}`} onClick={() => setView('bonus')}>
-          <Star size={14} /> Bonus Picks
+        <button
+          className={`tab-btn ${view === 'bonus' ? 'active' : ''}`}
+          onClick={() => setView('bonus')}
+          style={completion.bonusDone && view !== 'bonus' ? doneStyle : {}}
+        >
+          <Star size={14} /> Bonus Picks{completion.bonusDone && doneIndicator}
         </button>
         {locked && (
           <button className={`tab-btn ${view === 'field' ? 'active' : ''}`} onClick={() => setView('field')}
@@ -2607,9 +2680,32 @@ function PredictionsView({ predictions, onSave, results, locked }) {
         ))}
       </div>
 
-      {/* 3rd place table — shows as actual results come in */}
+      {/* 3rd place table — user's predicted standings */}
+      {Object.keys(predictions.group || {}).length > 0 && (() => {
+        const predStandings = computeAllStandings(predictions.group || {});
+        const predAllDone = GROUP_KEYS.every(g => GROUP_MATCHES.filter(m => m.group === g).every(m => { const r = predictions.group?.[m.id]; return r && r.h !== '' && r.h != null; }));
+        const predBest3 = predAllDone ? getBest3rdPlaceGroups(predStandings) : [];
+        return (
+          <div className="card" style={{ padding: 18, marginTop: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontStyle: 'italic', marginBottom: 8 }}>
+              Your predicted 3rd place standings
+            </div>
+            <ThirdPlaceTable standings={predStandings} qualifyingGroups={predBest3} />
+            {!predAllDone && (
+              <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 8, fontStyle: 'italic' }}>
+                Complete all 12 groups to see your predicted qualifiers.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* 3rd place table — actual results once they come in */}
       {Object.keys(results.group || {}).length > 0 && (
-        <div className="card" style={{ padding: 18, marginTop: 16 }}>
+        <div className="card" style={{ padding: 18, marginTop: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontStyle: 'italic', marginBottom: 8 }}>
+            Actual 3rd place standings
+          </div>
           <ThirdPlaceTable
             standings={computeAllStandings(results.group || {})}
             qualifyingGroups={(() => {
