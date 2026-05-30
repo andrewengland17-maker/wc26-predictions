@@ -6,7 +6,7 @@
   <title>WC26 Predictions</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
@@ -2293,16 +2293,12 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
       return r && r.h !== '' && r.h != null && r.a !== '' && r.a != null;
     }) && !!(joker.team && joker.group);
 
-    // Knockout: all 32 KO matches (73-104) have scores
-    // Only count matches where teams are known (bracket derived from group picks)
-    const { bracket } = buildBracket(group, ko);
+    // Knockout: all 32 KO matches (73-104) have scores, draws have pk winners
+    // User predictions store penalty winner as r.pk (not r.pkWinner which is admin results)
     const koDone = groupDone && range(73, 104).every(mId => {
-      const m = bracket[mId];
-      if (!m?.home || !m?.away) return true; // slot not yet derivable, skip
       const r = ko[mId];
       if (!r || r.h === '' || r.h == null || r.a === '' || r.a == null) return false;
-      // Check draw has pk winner
-      if (parseInt(r.h) === parseInt(r.a) && !r.pkWinner) return false;
+      if (parseInt(r.h) === parseInt(r.a) && !r.pk) return false;
       return true;
     });
 
@@ -5640,12 +5636,14 @@ function ThirdPlaceTable({ standings, qualifyingGroups = [] }) {
       return { ...s[2], group: g };
     })
     .filter(Boolean)
-    .filter(t => t.played > 0)
+    .filter(t => t.P > 0)
     .sort((a, b) => {
-      if (b.pts !== a.pts) return b.pts - a.pts;
-      const gda = a.gf - a.ga, gdb = b.gf - b.ga;
-      if (gdb !== gda) return gdb - gda;
-      return b.gf - a.gf;
+      if (b.Pts !== a.Pts) return b.Pts - a.Pts;
+      if (b.GD !== a.GD) return b.GD - a.GD;
+      if (b.GF !== a.GF) return b.GF - a.GF;
+      const ra = FIFA_RANKINGS[a.team] || 999, rb = FIFA_RANKINGS[b.team] || 999;
+      if (ra !== rb) return ra - rb;
+      return a.group.localeCompare(b.group);
     });
 
   if (!allThirds.length) return null;
@@ -5653,42 +5651,51 @@ function ThirdPlaceTable({ standings, qualifyingGroups = [] }) {
   const qualifies = (t) => qualifyingGroups.includes(t.group);
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: 8, overflowX: 'auto' }} className="scrollbar">
       <div className="micro-caps" style={{ marginBottom: 6, color: 'var(--ink-soft)' }}>3rd Place Rankings</div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid var(--line)' }}>
-            <th style={{ textAlign: 'left', padding: '3px 4px', fontWeight: 600 }}>Team</th>
-            <th style={{ textAlign: 'center', padding: '3px 2px', fontWeight: 600 }}>P</th>
-            <th style={{ textAlign: 'center', padding: '3px 2px', fontWeight: 600 }}>GD</th>
-            <th style={{ textAlign: 'center', padding: '3px 2px', fontWeight: 600 }}>GF</th>
-            <th style={{ textAlign: 'center', padding: '3px 2px', fontWeight: 600 }}>Pts</th>
-            <th style={{ textAlign: 'center', padding: '3px 2px', fontWeight: 600 }}>Grp</th>
+          <tr style={{ borderBottom: '1px solid var(--line)', textAlign: 'left' }}>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600 }}>#</th>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600 }}>Team</th>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600, textAlign: 'center' }}>P</th>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600, textAlign: 'center' }}>GD</th>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600, textAlign: 'center' }}>GF</th>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600, textAlign: 'center' }}>Pts</th>
+            <th style={{ padding: '4px 4px', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600, textAlign: 'center' }}>Grp</th>
           </tr>
         </thead>
         <tbody>
           {allThirds.map((t, i) => {
-            const through = qualifies(t) || (qualifyingGroups.length === 0 && i < 8);
+            const through = qualifies(t);
+            const possible = !through && qualifyingGroups.length === 0 && i < 8;
             return (
               <tr key={t.group} style={{
                 borderBottom: '1px solid var(--line-soft)',
                 background: through ? 'rgba(27,94,63,0.06)' : 'transparent',
               }}>
-                <td style={{ padding: '3px 4px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Flag team={t.team} size={12} />
-                  <span style={{ fontWeight: through ? 700 : 400 }}>{teamShort(t.team)}</span>
-                  {through && <span style={{ fontSize: 8, color: 'var(--forest)', fontWeight: 700, letterSpacing: '0.06em' }}>Q</span>}
+                <td style={{ padding: '6px 4px', color: through ? 'var(--forest)' : (possible ? 'var(--amber)' : 'var(--ink-soft)'), fontWeight: 600 }}>
+                  {i + 1}
                 </td>
-                <td style={{ textAlign: 'center', padding: '3px 2px' }}>{t.pts}</td>
-                <td style={{ textAlign: 'center', padding: '3px 2px' }}>{t.gf - t.ga > 0 ? '+' : ''}{t.gf - t.ga}</td>
-                <td style={{ textAlign: 'center', padding: '3px 2px' }}>{t.gf}</td>
-                <td style={{ textAlign: 'center', padding: '3px 2px', fontWeight: 700 }}>{t.pts}</td>
-                <td style={{ textAlign: 'center', padding: '3px 2px', color: 'var(--ink-soft)' }}>{t.group}</td>
+                <td style={{ padding: '6px 4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Flag team={t.team} size={14} />
+                  <span style={{ fontWeight: through ? 600 : 400 }}>{teamShort(t.team)}</span>
+                  {through && <span style={{ fontSize: 8, color: 'var(--forest)', fontWeight: 700, letterSpacing: '0.06em', marginLeft: 2 }}>Q</span>}
+                </td>
+                <td className="mono" style={{ padding: '6px 4px', textAlign: 'center' }}>{t.P}</td>
+                <td className="mono" style={{ padding: '6px 4px', textAlign: 'center' }}>{t.GD > 0 ? '+' + t.GD : t.GD}</td>
+                <td className="mono" style={{ padding: '6px 4px', textAlign: 'center' }}>{t.GF}</td>
+                <td className="mono" style={{ padding: '6px 4px', textAlign: 'center', fontWeight: 700 }}>{t.Pts}</td>
+                <td className="mono" style={{ padding: '6px 4px', textAlign: 'center', color: 'var(--ink-soft)' }}>{t.group}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      <div style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 6, display: 'flex', gap: 12 }}>
+        <span><span style={{ color: 'var(--forest)' }}>●</span> Qualifies</span>
+        <span><span style={{ color: 'var(--amber)' }}>●</span> Possible qualifier</span>
+      </div>
     </div>
   );
 }
