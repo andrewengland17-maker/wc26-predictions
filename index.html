@@ -6,7 +6,7 @@
   <title>WC26 Predictions</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
@@ -1813,7 +1813,7 @@ const CURRENT_USER_KEY = `${NS}-current-user`;
 const SCB_TEAMS = [
   'TMT', 'AME CT', 'ASA CT', 'E&A CT', 'GCNA CT',
   'TM', 'Capital', 'COO', 'Liquidity', 'RRP',
-  'CRO', 'CFO', 'GFS', 'Non-Treasury',
+  'CRO', 'CFO', 'GCFO IN', 'Non-Treasury',
 ];
 
 const SCB_COUNTRIES = [
@@ -1825,6 +1825,16 @@ const SCB_COUNTRIES = [
   'Qatar','Saudi Arabia','Singapore','South Africa','Taiwan',
   'Tanzania','Thailand','UAE','UK','Vietnam','Zambia','Zimbabwe','Other',
 ];
+
+const COUNTRY_REGION = {
+  'Australia':'ASA','Bahrain':'AME','Bangladesh':'ASA','Brunei':'ASA','Botswana':'AME',
+  'China':'GCNA','Egypt':'AME','Germany':'E&A','Ghana':'AME','Hong Kong':'GCNA',
+  'India':'ASA','Indonesia':'ASA','Iraq':'AME','Ivory Coast':'AME','Japan':'GCNA',
+  'Jordan':'AME','Kenya':'AME','Korea':'GCNA','Malaysia':'ASA','Mauritius':'AME',
+  'Nepal':'ASA','Nigeria':'AME','Pakistan':'AME','Philippines':'ASA','Poland':'E&A',
+  'Qatar':'AME','Saudi Arabia':'AME','Singapore':'ASA','South Africa':'AME','Taiwan':'GCNA',
+  'Tanzania':'AME','Thailand':'ASA','UAE':'AME','UK':'E&A','Vietnam':'ASA','Zambia':'AME','Zimbabwe':'AME',
+};
 
 // ──────────────────────────────────────────────────────────────────────
 // UI HELPERS / TOKENS
@@ -4675,6 +4685,7 @@ function FieldView({ participants, allPredictions, profiles }) {
 function LeaderboardView({ participants, allPredictions, results, profiles }) {
   const [breakdown, setBreakdown] = useState('team');
   const [filter, setFilter] = useState('total');
+  const [miniLeague, setMiniLeague] = useState('all'); // 'all' | team name | country name
 
   const actualBonus = results.bonus || {};
   const actualTiebreak = actualBonus.tiebreak || '';
@@ -4682,6 +4693,9 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
   const tiebreakActive = actualTiebreak || zeroZero;
   const grp = results.group || {};
   const ko = results.ko || {};
+
+  // Check if profiles have team/country data (SCB Treasury only)
+  const hasProfiles = participants.some(p => profiles[p]?.team || profiles[p]?.country);
 
   // Determine which filter sections are available based on actual results entered
   const availability = useMemo(() => {
@@ -4728,29 +4742,35 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
     const snapshot = results.rankingSnapshot?.rankings || null;
     const koStarted = Object.keys(ko).length > 0;
 
-    return participants.map(p => {
-      const preds = allPredictions[p] || { group: {}, ko: {} };
-      const score = computeUserScore(preds, results.group || {}, results.ko || {}, results.bracketTeams, results.bonus || {}, preds.joker || {});
-      const tbGuess = preds.bonus?.tiebreak || '';
-      const tbDist = tiebreakActive ? tiebreakDistance(tbGuess, actualTiebreak, zeroZero) : null;
-      const profile = profiles[p] || {};
-      const maxPossible = koStarted
-        ? computeMaxPossible(preds, score.total, results.ko || {}, results.bonus || {}, preds.joker || {})
-        : null;
-      return { name: p, ...score, tbGuess, tbDist, profile, maxPossible, snapshotRank: snapshot ? snapshot.indexOf(p) : -1 };
-    }).sort((a, b) => {
-      const aVal = a.sectionPts?.[activeFilter] ?? a.total;
-      const bVal = b.sectionPts?.[activeFilter] ?? b.total;
-      if (bVal !== aVal) return bVal - aVal;
-      // Tiebreak only applies on total score view
-      if (activeFilter === 'total') {
-        if (a.tbDist == null || b.tbDist == null) return 0;
-        if (zeroZero) return b.tbDist - a.tbDist;
-        return a.tbDist - b.tbDist;
-      }
-      return 0;
-    });
-  }, [participants, allPredictions, results, profiles, activeFilter]);
+    return participants
+      .filter(p => {
+        if (miniLeague === 'all') return true;
+        const prof = profiles[p] || {};
+        const region = prof.country ? COUNTRY_REGION[prof.country] : null;
+        return prof.team === miniLeague || prof.country === miniLeague || region === miniLeague;
+      })
+      .map(p => {
+        const preds = allPredictions[p] || { group: {}, ko: {} };
+        const score = computeUserScore(preds, results.group || {}, results.ko || {}, results.bracketTeams, results.bonus || {}, preds.joker || {});
+        const tbGuess = preds.bonus?.tiebreak || '';
+        const tbDist = tiebreakActive ? tiebreakDistance(tbGuess, actualTiebreak, zeroZero) : null;
+        const profile = profiles[p] || {};
+        const maxPossible = koStarted
+          ? computeMaxPossible(preds, score.total, results.ko || {}, results.bonus || {}, preds.joker || {})
+          : null;
+        return { name: p, ...score, tbGuess, tbDist, profile, maxPossible, snapshotRank: snapshot ? snapshot.indexOf(p) : -1 };
+      }).sort((a, b) => {
+        const aVal = a.sectionPts?.[activeFilter] ?? a.total;
+        const bVal = b.sectionPts?.[activeFilter] ?? b.total;
+        if (bVal !== aVal) return bVal - aVal;
+        if (activeFilter === 'total') {
+          if (a.tbDist == null || b.tbDist == null) return 0;
+          if (zeroZero) return b.tbDist - a.tbDist;
+          return a.tbDist - b.tbDist;
+        }
+        return 0;
+      });
+  }, [participants, allPredictions, results, profiles, activeFilter, miniLeague]);
 
   const maxScore = Math.max(...scores.map(s => s.sectionPts?.[activeFilter] ?? s.total), 1);
   const actualMatchesDone = Object.values(results.group || {}).filter(r => r && r.h !== '' && r.h != null).length;
@@ -4771,7 +4791,19 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
       .sort((a, b) => b.avg - a.avg);
   }, [scores]);
 
-  const countryStats = useMemo(() => {
+  const regionStats = useMemo(() => {
+    const stats = {};
+    scores.forEach(s => {
+      const region = s.profile?.country ? COUNTRY_REGION[s.profile.country] : null;
+      if (!region) return;
+      if (!stats[region]) stats[region] = { count: 0, totalPts: 0 };
+      stats[region].count++;
+      stats[region].totalPts += s.total;
+    });
+    return Object.entries(stats)
+      .map(([region, { count, totalPts }]) => ({ region, count, avg: count ? totalPts / count : 0 }))
+      .sort((a, b) => b.avg - a.avg);
+  }, [scores]);
     const stats = {};
     scores.forEach(s => {
       const country = s.profile?.country;
@@ -4793,8 +4825,8 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
         subtitle={actualMatchesDone === 0 ? 'No results entered yet — leaderboard will populate as matches are played.' : `${actualMatchesDone}/72 group matches resulted`}
       />
 
-      {/* Filter dropdown */}
-      <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      {/* Filters row */}
+      <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <span className="micro-caps" style={{ flexShrink: 0 }}>Ranked by</span>
         <select
           value={activeFilter}
@@ -4820,11 +4852,56 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
             ← Total
           </button>
         )}
+
+        {/* Mini-league filter — only shown for SCB Treasury (has team/country data) */}
+        {hasProfiles && (() => {
+          const teams = [...new Set(participants.map(p => profiles[p]?.team).filter(Boolean))].sort();
+          const countries = [...new Set(participants.map(p => profiles[p]?.country).filter(Boolean))].sort();
+          const regions = [...new Set(participants.map(p => {
+            const c = profiles[p]?.country;
+            return c ? COUNTRY_REGION[c] : null;
+          }).filter(Boolean))].sort();
+          return (
+            <select
+              value={miniLeague}
+              onChange={e => setMiniLeague(e.target.value)}
+              style={{
+                padding: '8px 12px', fontSize: 14, fontWeight: 600,
+                border: `1px solid ${miniLeague !== 'all' ? 'var(--burgundy)' : 'var(--line)'}`,
+                borderRadius: 4, background: miniLeague !== 'all' ? 'rgba(159,27,27,0.05)' : 'var(--paper)',
+                fontFamily: 'inherit', color: miniLeague !== 'all' ? 'var(--burgundy)' : 'var(--ink)',
+                minWidth: 160,
+              }}
+            >
+              <option value="all">🌍 All participants</option>
+              <optgroup label="── By Team ──">
+                {teams.map(t => <option key={t} value={t}>🏢 {t}</option>)}
+              </optgroup>
+              <optgroup label="── By Region ──">
+                {regions.map(r => <option key={r} value={r}>🗺 {r}</option>)}
+              </optgroup>
+              <optgroup label="── By Country ──">
+                {countries.map(c => <option key={c} value={c}>🌐 {c}</option>)}
+              </optgroup>
+            </select>
+          );
+        })()}
+        {miniLeague !== 'all' && (
+          <button className="btn-ghost btn" style={{ fontSize: 12, padding: '6px 10px' }}
+            onClick={() => setMiniLeague('all')}>
+            ✕ Clear filter
+          </button>
+        )}
       </div>
 
       {snapshotLabel && (
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span>📸</span> Movement vs: <strong>{snapshotLabel}</strong>
+        </div>
+      )}
+      {miniLeague !== 'all' && (
+        <div style={{ marginTop: 10, fontSize: 13, color: 'var(--burgundy)', fontWeight: 600 }}>
+          Showing {scores.length} participant{scores.length !== 1 ? 's' : ''} in: {miniLeague}
         </div>
       )}
 
@@ -4920,7 +4997,7 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
             <h3 className="display" style={{ fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>Breakdown</h3>
             <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
             <div style={{ display: 'inline-flex', background: 'var(--cream-2)', borderRadius: 6, padding: 2, border: '1px solid var(--line)' }}>
-              {['team', 'country'].map(b => (
+              {['team', 'region', 'country'].map(b => (
                 <button key={b} onClick={() => setBreakdown(b)} style={{
                   background: breakdown === b ? 'var(--ink)' : 'transparent',
                   color: breakdown === b ? 'var(--cream)' : 'var(--ink-soft)',
@@ -4946,6 +5023,29 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
                   {teamStats.map(({ team, count, avg }, i) => (
                     <tr key={team} style={{ borderBottom: '1px solid var(--line-soft)', background: i === 0 ? 'rgba(214,137,42,0.05)' : 'transparent' }}>
                       <td style={{ padding: '9px 14px', fontWeight: i === 0 ? 700 : 400 }}>{team}</td>
+                      <td style={{ padding: '9px 14px', textAlign: 'center', color: 'var(--ink-soft)' }}>{count}</td>
+                      <td style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700 }} className="mono">{avg.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {breakdown === 'region' && (
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--cream-2)', borderBottom: '1px solid var(--line)' }}>
+                    <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600 }}>Region</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'center', fontWeight: 600 }}>Participants</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 600 }}>Avg pts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {regionStats.map(({ region, count, avg }, i) => (
+                    <tr key={region} style={{ borderBottom: '1px solid var(--line-soft)', background: i === 0 ? 'rgba(214,137,42,0.05)' : 'transparent' }}>
+                      <td style={{ padding: '9px 14px', fontWeight: i === 0 ? 700 : 400 }}>{region}</td>
                       <td style={{ padding: '9px 14px', textAlign: 'center', color: 'var(--ink-soft)' }}>{count}</td>
                       <td style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700 }} className="mono">{avg.toFixed(1)}</td>
                     </tr>
