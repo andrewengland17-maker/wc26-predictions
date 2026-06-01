@@ -1780,7 +1780,7 @@ const computeMatchBracketPts = (matchId, userBracket, actualDerivedBracket, actu
 
 
 // ── Competition config ────────────────────────────────────────────────
-const COMPETITION_ID = window.__COMPETITION_ID || 'scb-treasury';
+const COMPETITION_ID = 'scb-treasury';
 
 const COMPETITION_CONFIG = {
   'scb-treasury': {
@@ -2038,6 +2038,7 @@ function App() {
         userProfile={profiles[currentUser] || null}
         locked={locked}
         predictions={predictions}
+        profiles={profiles}
       />
       {locked && view !== 'admin' && (
         <div style={{ background: 'var(--burgundy)', color: 'white', textAlign: 'center', padding: '8px 16px', fontSize: 13, fontWeight: 600, letterSpacing: '0.04em' }}>
@@ -2077,6 +2078,15 @@ function App() {
             profiles={profiles}
           />
         )}
+        {view === 'browse' && locked && (
+          <BrowseView
+            participants={participants}
+            allPredictions={allPredictions}
+            results={results}
+            profiles={profiles}
+            currentUser={currentUser}
+          />
+        )}
         {view === 'field' && locked && (
           <FieldView
             participants={participants}
@@ -2099,6 +2109,212 @@ function App() {
         )}
       </main>
       <Footer />
+    </div>
+  );
+}
+
+
+// ──────────────────────────────────────────────────────────────────────
+// BROWSE PICKS
+// ──────────────────────────────────────────────────────────────────────
+function BrowseView({ participants, allPredictions, results, profiles, currentUser }) {
+  const [selected, setSelected] = useState(null);
+
+  const sortedParticipants = useMemo(() => {
+    return [...participants].sort((a, b) => a.localeCompare(b));
+  }, [participants]);
+
+  const viewPreds = selected ? (allPredictions[selected] || { group: {}, ko: {} }) : null;
+
+  return (
+    <div>
+      <SectionHeader
+        kicker={`${participants.length} participants`}
+        title="Browse Picks"
+        subtitle="Select a participant to view their full predictions. Available once the competition is locked."
+      />
+
+      {/* Participant grid */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16, marginBottom: 20 }}>
+        {sortedParticipants.map(p => {
+          const prof = profiles[p] || {};
+          const isMe = p === currentUser;
+          const isSelected = p === selected;
+          return (
+            <button
+              key={p}
+              className="pill"
+              onClick={() => setSelected(isSelected ? null : p)}
+              style={{
+                cursor: 'pointer',
+                background: isSelected ? 'var(--ink)' : isMe ? 'rgba(27,94,63,0.1)' : 'var(--cream-2)',
+                color: isSelected ? 'var(--cream)' : 'var(--ink)',
+                border: `1px solid ${isSelected ? 'var(--ink)' : isMe ? 'var(--forest)' : 'var(--line)'}`,
+                fontWeight: isSelected ? 700 : 400,
+                padding: '6px 12px',
+                fontSize: 13,
+              }}
+              title={prof.team ? `${prof.team} · ${prof.country}` : ''}
+            >
+              {p}{isMe ? ' (you)' : ''}
+            </button>
+          );
+        })}
+      </div>
+
+      {!selected && (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ink-soft)', fontSize: 14, fontStyle: 'italic' }}>
+          Tap a name above to view their picks
+        </div>
+      )}
+
+      {selected && viewPreds && (
+        <div className="fadein">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div className="display" style={{ fontSize: 22, fontWeight: 700 }}>{selected}</div>
+              {profiles[selected] && (
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+                  {profiles[selected].team && profiles[selected].team + ' · '}
+                  {profiles[selected].country}
+                </div>
+              )}
+            </div>
+            <button
+              className="btn"
+              style={{ fontSize: 12, padding: '6px 12px', background: 'var(--forest)', color: 'white', display: 'flex', alignItems: 'center', gap: 5 }}
+              onClick={() => printPicks(viewPreds, selected, profiles)}
+              title="Download this person's picks as PDF"
+            >
+              🖨️ Download as PDF
+            </button>
+          </div>
+
+          {/* Group stage picks — read only */}
+          <BrowseGroupStage predictions={viewPreds} results={results} />
+
+          {/* Knockout picks — read only */}
+          <div style={{ marginTop: 20 }}>
+            <div className="micro-caps" style={{ marginBottom: 10 }}>Knockout Bracket</div>
+            <BracketView
+              predictions={viewPreds}
+              onSave={() => {}}
+              results={results}
+              locked={true}
+            />
+          </div>
+
+          {/* Bonus picks */}
+          <BrowseBonus predictions={viewPreds} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BrowseGroupStage({ predictions, results }) {
+  const [openGroup, setOpenGroup] = useState(null);
+  const standings = useMemo(() => computeAllStandings(predictions.group || {}), [predictions]);
+
+  return (
+    <div>
+      <div className="micro-caps" style={{ marginBottom: 10 }}>Group Stage Picks</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {GROUP_KEYS.map(g => {
+          const matches = GROUP_MATCHES.filter(m => m.group === g);
+          const done = matches.filter(m => {
+            const r = (predictions.group || {})[m.id];
+            return r && r.h !== '' && r.h != null;
+          }).length;
+          const isOpen = openGroup === g;
+          return (
+            <div key={g} className="card" style={{ overflow: 'hidden' }}>
+              <button
+                onClick={() => setOpenGroup(isOpen ? null : g)}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', padding: '12px 16px', textAlign: 'left', cursor: 'pointer' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className="group-letter" style={{ color: 'var(--burgundy)' }}>{g}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Group {g}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className={`pill ${done === matches.length ? 'pill-success' : ''}`}>{done}/{matches.length}</span>
+                  {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </div>
+              </button>
+              {isOpen && (
+                <div className="fadein" style={{ borderTop: '1px solid var(--line)', padding: '12px 16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto minmax(0,1fr)', alignItems: 'center', gap: 0 }}>
+                    {matches.map(m => {
+                      const r = (predictions.group || {})[m.id] || {};
+                      const actual = (results.group || {})[m.id] || {};
+                      const hasScore = r.h !== '' && r.h != null && r.a !== '' && r.a != null;
+                      const hasActual = actual.h !== '' && actual.h != null && actual.a !== '' && actual.a != null;
+                      return (
+                        <React.Fragment key={m.id}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
+                            <span style={{ fontSize: 13 }}>{teamShort(m.home)}</span>
+                            <Flag team={m.home} size={14} />
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '6px 8px', borderBottom: '1px solid var(--line-soft)' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--forest)', fontVariantNumeric: 'tabular-nums' }}>
+                              {hasScore ? `${r.h}–${r.a}` : '–'}
+                            </span>
+                            {hasActual && (
+                              <div style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>
+                                ({actual.h}–{actual.a})
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
+                            <Flag team={m.away} size={14} />
+                            <span style={{ fontSize: 13 }}>{teamShort(m.away)}</span>
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 12, background: 'var(--cream-2)', padding: 10, borderRadius: 4 }}>
+                    <StandingsTable standings={standings[g] || []} />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BrowseBonus({ predictions }) {
+  const bonus = predictions.bonus || {};
+  const joker = predictions.joker || {};
+
+  const rows = [
+    { icon: '🏆', label: 'Winner', value: bonus.winner },
+    { icon: '🥈', label: 'Runner-up', value: bonus.runnerUp },
+    { icon: '🥉', label: '3rd Place', value: bonus.thirdPlace },
+    { icon: '⚽', label: 'Golden Boot', value: bonus.goldenBoot },
+    { icon: '⏱', label: 'Tie-break', value: bonus.tiebreak },
+    { icon: '🃏', label: 'Joker Team', value: joker.team },
+    { icon: '🃏', label: 'Joker Group', value: joker.group ? `Group ${joker.group}` : null },
+  ];
+
+  return (
+    <div className="card" style={{ padding: 18, marginTop: 20 }}>
+      <div className="micro-caps" style={{ marginBottom: 12 }}>Bonus Picks</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+        {rows.map(({ icon, label, value }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{icon}</span>
+            <div>
+              <div style={{ fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{value || <span style={{ color: 'var(--ink-soft)', fontStyle: 'italic' }}>Not set</span>}</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2288,7 +2504,246 @@ function LoginScreen({ onLogin, participants, profiles }) {
 // HEADER / NAV
 // ──────────────────────────────────────────────────────────────────────
 
-function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked, predictions }) {
+// ── PDF / Print export ────────────────────────────────────────────────
+// ── Print / PDF export ────────────────────────────────────────────────────────────────────
+const printPicks = (predictions, user, profiles) => {
+  const grp = predictions.group || {};
+  const ko = predictions.ko || {};
+  const bonus = predictions.bonus || {};
+  const joker = predictions.joker || {};
+  const profile = profiles[user] || {};
+  const { bracket } = buildBracket(grp, ko);
+  const allStandings = computeAllStandings(grp);
+  const f = (team) => TEAM_FLAGS[team] || '';
+  const s = (team, max) => { if (!team) return 'TBD'; const m = max || 99; return team.length > m ? team.slice(0,m-1)+'\u2026' : team; };
+
+  const css = [
+    '* { box-sizing:border-box; margin:0; padding:0; }',
+    '@page { size: A4 landscape; margin: 10mm; }',
+    'body { font-family: "Noto Color Emoji","Segoe UI Emoji","Apple Color Emoji",Helvetica Neue,Arial,sans-serif; font-size:10px; color:#1a1715; background:white; }',
+    '.page { width:100%; padding:0; }',
+    '.hdr { border-bottom:2px solid #9f1b1b; padding-bottom:8px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:flex-end; }',
+    '.hdr-title { font-size:18px; font-weight:700; }',
+    '.hdr-title em { color:#9f1b1b; font-style:italic; }',
+    '.hdr-meta { font-size:9px; color:#6b635b; text-align:right; line-height:1.5; }',
+    '.sec-row { display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #ddd2b8; padding-bottom:2px; margin-bottom:10px; }',
+    '.sec { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9f1b1b; }',
+    '.joker-info { font-size:10px; color:#6b635b; }',
+    '.joker-info strong { color:#1a1715; }',
+    '.gg { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:8px; }',
+    '.gb { break-inside:avoid; }',
+    '.gt { font-size:9px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:#6b635b; margin-bottom:2px; }',
+    '.mt { width:100%; border-collapse:collapse; margin-bottom:4px; }',
+    '.mt td { padding:2px 2px; vertical-align:middle; font-size:9px; }',
+    '.mh { text-align:right; white-space:nowrap; max-width:115px; overflow:hidden; text-overflow:ellipsis; }',
+    '.ma { text-align:left; white-space:nowrap; max-width:115px; overflow:hidden; text-overflow:ellipsis; }',
+    '.ms { text-align:center; font-weight:700; color:#1b5e3f; padding:2px 4px; white-space:nowrap; }',
+    '.mt tr { border-bottom:1px solid #f0ebe0; }',
+    '.st { width:100%; border-collapse:collapse; }',
+    '.st th { font-size:8px; color:#6b635b; padding:1px 2px; border-bottom:1px solid #ddd2b8; text-align:center; }',
+    '.st th:first-child { text-align:left; }',
+    '.st td { font-size:8px; padding:2px 2px; border-bottom:1px solid #f0ebe0; text-align:center; }',
+    '.st td:first-child { text-align:left; white-space:nowrap; font-size:8px; }',
+    '.qr { background:rgba(27,94,63,0.06); }',
+    '.pb { page-break-after:always; break-after:page; }',
+    '.ft { margin-top:8px; border-top:1px solid #ddd2b8; padding-top:5px; font-size:9px; color:#9b9087; display:flex; justify-content:space-between; }',
+    '.brk { display:flex; flex-direction:row; align-items:flex-start; justify-content:center; gap:0; }',
+    '.brc { display:flex; flex-direction:column; }',
+    '.bsl { display:flex; align-items:center; justify-content:center; }',
+    '.bmc { width:110px; border:1px solid #c8bfab; border-radius:2px; overflow:hidden; background:white; flex-shrink:0; }',
+    '.bmt { display:flex; justify-content:space-between; align-items:center; padding:1px 3px; height:15px; }',
+    '.bmw { background:#e8f5ee; }',
+    '.bmn { font-size:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:87px; }',
+    '.bms { font-size:8px; font-weight:700; color:#1b5e3f; }',
+    '.bmd { border-top:1px solid #ede7d6; }',
+    '.con { display:flex; flex-direction:column; }',
+    '.ct { border-right:1px solid #aaa; border-bottom:1px solid #aaa; }',
+    '.cb { border-right:1px solid #aaa; border-top:1px solid #aaa; }',
+    '.ctr { border-left:1px solid #aaa; border-bottom:1px solid #aaa; }',
+    '.cbr { border-left:1px solid #aaa; border-top:1px solid #aaa; }',
+    '.ch { border-top:1px solid #aaa; }',
+    '.rnd-lbl { font-size:8px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#6b635b; text-align:center; margin-bottom:3px; }',
+    '.fin-lbl { font-size:9px; font-weight:700; color:#9f1b1b; text-align:center; letter-spacing:.06em; text-transform:uppercase; margin-bottom:3px; }',
+    '.bn-tbl { border-collapse:collapse; }',
+    '.bn-tbl td { padding:3px 6px; border-bottom:1px solid #ede7d6; font-size:10px; }',
+    '.bn-lbl { font-weight:600; color:#6b635b; width:120px; }',
+    '@media print { body { print-color-adjust:exact; -webkit-print-color-adjust:exact; } }',
+  ].join(' ');
+
+  const U = 56;
+  const LW = 9;
+
+  const bmc = (mId) => {
+    const m = bracket[mId] || {};
+    const r = ko[mId] || {};
+    const h = m.home || null;
+    const a = m.away || null;
+    const hs = (r.h !== '' && r.h != null) ? r.h : null;
+    const as_ = (r.a !== '' && r.a != null) ? r.a : null;
+    const hasScore = hs !== null && as_ !== null;
+    const hW = hasScore && parseInt(hs) > parseInt(as_);
+    const aW = hasScore && parseInt(as_) > parseInt(hs);
+    const tl = (team, score, win) =>
+      '<div class="bmt' + (win ? ' bmw' : '') + '">' +
+      '<span class="bmn">' + (team ? f(team)+' '+s(team,13) : '<em style="color:#bbb">TBD</em>') + '</span>' +
+      (score !== null ? '<b class="bms">'+score+'</b>' : '') +
+      '</div>';
+    return '<div class="bmc">' + tl(h,hs,hW) + '<div class="bmd"></div>' + tl(a,as_,aW) + '</div>';
+  };
+
+  const bslot = (mId, slotH) =>
+    '<div class="bsl" style="height:' + slotH + 'px;">' + bmc(mId) + '</div>';
+
+  const rcol = (ids, slotH, lbl) =>
+    '<div><div class="rnd-lbl">' + lbl + '</div><div class="brc">' +
+    ids.map(id => bslot(id, slotH)).join('') + '</div></div>';
+
+  const lcon = (n, slotH) => {
+    let h = '';
+    for (let i = 0; i < n; i++) {
+      h += '<div class="ct" style="height:' + slotH + 'px;width:' + LW + 'px;"></div>';
+      h += '<div class="cb" style="height:' + slotH + 'px;width:' + LW + 'px;"></div>';
+    }
+    return '<div class="con" style="margin-top:19px;">' + h + '</div>';
+  };
+
+  const rcon = (n, slotH) => {
+    let h = '';
+    for (let i = 0; i < n; i++) {
+      h += '<div class="ctr" style="height:' + slotH + 'px;width:' + LW + 'px;"></div>';
+      h += '<div class="cbr" style="height:' + slotH + 'px;width:' + LW + 'px;"></div>';
+    }
+    return '<div class="con" style="margin-top:19px;">' + h + '</div>';
+  };
+
+  const hline = (slotH) =>
+    '<div style="width:' + LW + 'px;height:' + slotH + 'px;display:flex;align-items:center;margin-top:19px;">' +
+    '<div class="ch" style="width:100%;height:0;"></div></div>';
+
+  const totalH = U * 8;
+
+  const leftBracket =
+    '<div style="display:flex;flex-direction:row;align-items:flex-start;">' +
+    rcol([74,77,73,75,83,84,81,82], U, 'R32') +
+    lcon(4, U) +
+    rcol([89,90,93,94], U*2, 'R16') +
+    lcon(2, U*2) +
+    rcol([97,98], U*4, 'QF') +
+    lcon(1, U*4) +
+    hline(U*8) +
+    rcol([101], U*8, 'SF') +
+    hline(U*8) +
+    '</div>';
+
+  const rightBracket =
+    '<div style="display:flex;flex-direction:row;align-items:flex-start;">' +
+    hline(U*8) +
+    rcol([102], U*8, 'SF') +
+    hline(U*8) +
+    rcon(1, U*4) +
+    rcol([99,100], U*4, 'QF') +
+    rcon(2, U*2) +
+    rcol([91,92,95,96], U*2, 'R16') +
+    rcon(4, U) +
+    rcol([76,78,79,80,86,88,85,87], U, 'R32') +
+    '</div>';
+
+  const center =
+    '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:' + (totalH+19) + 'px;padding:0 8px;gap:12px;">' +
+    '<div><div class="fin-lbl">\u2738 Final</div>' + bmc(104) + '</div>' +
+    '<div><div class="rnd-lbl">3rd Place</div>' + bmc(103) + '</div>' +
+    '</div>';
+
+  const bracketSection =
+    '<div class="brk">' + leftBracket + center + rightBracket + '</div>';
+
+  const standingRow = (t, i) =>
+    '<tr' + (i < 2 ? ' class="qr"' : '') + '>' +
+    '<td>' + (i+1) + '. ' + f(t.team) + ' ' + s(t.team,14) + '</td>' +
+    '<td>' + t.P + '</td><td>' + t.Pts + '</td>' +
+    '<td>' + (t.GD>0?'+':'') + t.GD + '</td>' +
+    '<td>' + t.GF + '</td></tr>';
+
+  let groupsHtml = '';
+  GROUP_KEYS.forEach(g => {
+    const matches = GROUP_MATCHES.filter(m => m.group === g);
+    const standings = allStandings[g] || [];
+    groupsHtml += '<div class="gb">' +
+      '<div class="gt">Group ' + g + '</div>' +
+      '<table class="mt">' +
+      matches.map(m => {
+        const r = grp[m.id] || {};
+        const has = r.h !== '' && r.h != null && r.a !== '' && r.a != null;
+        return '<tr>' +
+          '<td class="mh">' + f(m.home)+' '+s(m.home,16) + '</td>' +
+          '<td class="ms">' + (has ? r.h+' \u2013 '+r.a : '_ \u2013 _') + '</td>' +
+          '<td class="ma">' + f(m.away)+' '+s(m.away,16) + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</table>' +
+      (standings.length ?
+        '<table class="st"><thead><tr><th>Team</th><th>P</th><th>Pts</th><th>GD</th><th>GF</th></tr></thead><tbody>' +
+        standings.map((t,i) => standingRow(t,i)).join('') +
+        '</tbody></table>' : '') +
+      '</div>';
+  });
+
+  const bonusRows = [
+    ['\uD83C\uDFC6 Winner', bonus.winner ? f(bonus.winner)+' '+bonus.winner : '\u2014'],
+    ['\uD83E\uDD48 Runner-up', bonus.runnerUp ? f(bonus.runnerUp)+' '+bonus.runnerUp : '\u2014'],
+    ['\uD83E\uDD49 3rd Place', bonus.thirdPlace ? f(bonus.thirdPlace)+' '+bonus.thirdPlace : '\u2014'],
+    ['\u26BD Golden Boot', bonus.goldenBoot || '\u2014'],
+    ['\u23F1 Tie-break', bonus.tiebreak || '\u2014'],
+  ].map(([l,v]) => '<tr><td class="bn-lbl">'+l+'</td><td>'+v+'</td></tr>').join('');
+
+  const hdr = (sub) =>
+    '<div class="hdr"><div><div class="hdr-title">WC26 <em>Predictions</em></div>' +
+    '<div style="font-size:10px;color:#6b635b;margin-top:1px;">' + sub + '</div></div>' +
+    '<div class="hdr-meta"><strong>' + user + '</strong><br>' +
+    (profile.team ? profile.team+' \u00B7 ' : '') + (profile.country||'') + '</div></div>';
+
+  const jokerLine =
+    '<div class="joker-info">' +
+    '\uD83C\uDCCF Joker: <strong>' + (joker.team ? f(joker.team)+' '+joker.team : '\u2014') + '</strong>' +
+    ' &nbsp;&nbsp; Group: <strong>' + (joker.group ? joker.group : '\u2014') + '</strong>' +
+    '</div>';
+
+  const secRow = (label) =>
+    '<div class="sec-row"><span class="sec">' + label + '</span>' + jokerLine + '</div>';
+
+  const date = new Date().toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'});
+
+  const html =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<title>WC26 Picks \u2014 ' + user + '</title>' +
+    '<link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">' +
+    '<style>' + css + '</style></head><body>' +
+    '<div class="page">' +
+    hdr('Group Stage Picks \u00B7 Printed ' + date) +
+    secRow('Group Stage Predictions') +
+    '<div class="gg">' + groupsHtml + '</div>' +
+    '<div class="ft"><span>WC26 Predictions Competition</span><span>Page 1 of 2</span></div>' +
+    '</div>' +
+    '<div class="pb"></div>' +
+    '<div class="page">' +
+    hdr('Knockout Stage \u0026 Bonus Picks') +
+    '<div class="sec-row"><span class="sec">Knockout Bracket</span></div>' +
+    bracketSection +
+    '<div style="margin-top:10px;"><div class="sec-row"><span class="sec">Bonus Picks</span></div>' +
+    '<table class="bn-tbl">' + bonusRows + '</table></div>' +
+    '<div class="ft"><span>WC26 Predictions Competition</span><span>Page 2 of 2</span></div>' +
+    '</div>' +
+    '<scr'+'ipt>window.print();<\/script>' +
+    '</body></html>';
+
+  const blob = new Blob([html], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+};
+
+
+
+function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked, predictions, profiles }) {
   // Compute completion status for each tab
   const completion = useMemo(() => {
     const p = predictions || {};
@@ -2342,6 +2797,13 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
               <div style={{ fontSize: 11, color: 'var(--ink-soft)' }}>{userProfile.team} · {userProfile.country}</div>
             )}
           </div>
+          <button
+            className="btn"
+            style={{ fontSize: 12, padding: '6px 12px', background: 'var(--forest)', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+            onClick={() => printPicks(predictions, user, profiles)}
+            title="Download your picks as a PDF">
+            🖨️ Download as PDF
+          </button>
           <button className="btn-ghost" style={{ background: 'none', border: 'none', padding: 6, color: 'var(--ink-soft)' }} onClick={onLogout} title="Sign out">
             <LogOut size={16} />
           </button>
@@ -6354,6 +6816,6 @@ function BracketTeamsAdmin({ results, onSave }) {
 
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
+</script>
 </body>
 </html>
