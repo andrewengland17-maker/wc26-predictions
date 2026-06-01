@@ -4804,6 +4804,8 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
       .map(([region, { count, totalPts }]) => ({ region, count, avg: count ? totalPts / count : 0 }))
       .sort((a, b) => b.avg - a.avg);
   }, [scores]);
+
+  const countryStats = useMemo(() => {
     const stats = {};
     scores.forEach(s => {
       const country = s.profile?.country;
