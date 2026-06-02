@@ -2135,7 +2135,7 @@ function BrowseView({ participants, allPredictions, results, profiles, currentUs
         subtitle="View predictions by participant or by match." />
 
       <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--line)', marginTop:16, marginBottom:20 }}>
-        {[['participant','\uD83D\uDC64 By Participant'],['match','\u26BD By Match']].map(([key,label]) => (
+        {[['participant','\uD83D\uDC64 By Participant'],['match','\u26BD By Match'],['h2h','\u2694\uFE0F Head to Head']].map(([key,label]) => (
           <button key={key} onClick={() => { setBrowseTab(key); setSelected(null); }}
             style={{ padding:'8px 18px', fontSize:13, fontWeight:browseTab===key?700:400, background:'none', border:'none', cursor:'pointer',
               color:browseTab===key?'var(--ink)':'var(--ink-soft)',
@@ -2186,6 +2186,249 @@ function BrowseView({ participants, allPredictions, results, profiles, currentUs
       {browseTab === 'match' && (
         <MatchPicksView participants={participants} allPredictions={allPredictions}
           results={results} selected={selected} setSelected={setSelected} />
+      )}
+      {browseTab === 'h2h' && (
+        <HeadToHeadView participants={participants} allPredictions={allPredictions}
+          results={results} profiles={profiles} />
+      )}
+    </div>
+  );
+}
+
+
+function HeadToHeadView({ participants, allPredictions, results, profiles }) {
+  const [playerA, setPlayerA] = useState('');
+  const [playerB, setPlayerB] = useState('');
+
+  const sorted = useMemo(() => [...participants].sort((a,b) => a.localeCompare(b)), [participants]);
+
+  const predsA = playerA ? (allPredictions[playerA] || { group:{}, ko:{} }) : null;
+  const predsB = playerB ? (allPredictions[playerB] || { group:{}, ko:{} }) : null;
+
+  const scoreA = useMemo(() => predsA ? computeUserScore(predsA, results.group||{}, results.ko||{}, results.bracketTeams, results.bonus||{}, predsA.joker||{}) : null, [predsA, results]);
+  const scoreB = useMemo(() => predsB ? computeUserScore(predsB, results.group||{}, results.ko||{}, results.bracketTeams, results.bonus||{}, predsB.joker||{}) : null, [predsB, results]);
+
+  const bracketA = useMemo(() => predsA ? buildBracket(predsA.group||{}, predsA.ko||{}).bracket : {}, [predsA]);
+  const bracketB = useMemo(() => predsB ? buildBracket(predsB.group||{}, predsB.ko||{}).bracket : {}, [predsB]);
+  const actualBracket = useMemo(() => buildActualBracket(results.group||{}, results.ko||{}).bracket, [results]);
+
+  const selectStyle = { padding:'8px 12px', fontSize:14, fontWeight:600, border:'1px solid var(--line)', borderRadius:4, background:'var(--paper)', fontFamily:'inherit', color:'var(--ink)', minWidth:160 };
+
+  const agree = (pA, pB) => pA && pB && pA.h !== '' && pA.h != null && pB.h !== '' && pB.h != null && pA.h == pB.h && pA.a == pB.a;
+  const exact = (pred, actual) => pred && actual && actual.h !== '' && actual.h != null && parseInt(pred.h) === parseInt(actual.h) && parseInt(pred.a) === parseInt(actual.a);
+
+  const renderMatchRow = (mId, isKo, home, away) => {
+    const predA = isKo ? (predsA?.ko||{})[mId] : (predsA?.group||{})[mId];
+    const predB = isKo ? (predsB?.ko||{})[mId] : (predsB?.group||{})[mId];
+    const actual = isKo ? (results.ko||{})[mId] : (results.group||{})[mId];
+    const hasResult = actual && actual.h !== '' && actual.h != null;
+    const isAgree = agree(predA, predB);
+    const exA = exact(predA, actual);
+    const exB = exact(predB, actual);
+    const hasA = predA && predA.h !== '' && predA.h != null;
+    const hasB = predB && predB.h !== '' && predB.h != null;
+
+    // KO: get predicted teams from each bracket
+    const bmA = isKo ? bracketA[mId] : null;
+    const bmB = isKo ? bracketB[mId] : null;
+
+    return (
+      <div key={mId} style={{
+        display:'grid', gridTemplateColumns:'1fr auto 1fr',
+        borderBottom:'1px solid var(--line-soft)',
+        background: isAgree ? 'rgba(27,94,63,0.04)' : 'transparent',
+        padding:'6px 12px', alignItems:'center', gap:8,
+      }}>
+        {/* Player A */}
+        <div style={{ textAlign:'right' }}>
+          {hasA ? (
+            <span style={{ fontWeight: exA?700:400, color: exA?'var(--forest)':'var(--ink)', fontSize:13 }}>
+              {exA && '⭐ '}
+              {isKo && bmA?.home && <><Flag team={bmA.home} size={12}/> {teamShort(bmA.home)} </>}
+              <span style={{ fontVariantNumeric:'tabular-nums', fontWeight:700 }}>{predA.h}{'–'}{predA.a}</span>
+              {isKo && bmA?.away && <> <Flag team={bmA.away} size={12}/> {teamShort(bmA.away)}</>}
+            </span>
+          ) : <span style={{ color:'var(--ink-soft)', fontSize:12, fontStyle:'italic' }}>—</span>}
+        </div>
+
+        {/* Match info centre */}
+        <div style={{ textAlign:'center', minWidth:140 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:11, color:'var(--ink-soft)' }}>
+            <Flag team={home} size={11}/><span>{teamShort(home)}</span>
+            <span style={{ margin:'0 2px' }}>vs</span>
+            <Flag team={away} size={11}/><span>{teamShort(away)}</span>
+          </div>
+          {hasResult && (
+            <div style={{ fontSize:12, fontWeight:700, color:'var(--burgundy)', marginTop:2 }}>
+              {actual.h}{'–'}{actual.a}
+            </div>
+          )}
+          {isAgree && <div style={{ fontSize:10, color:'var(--forest)', fontWeight:600 }}>✓ Agree</div>}
+        </div>
+
+        {/* Player B */}
+        <div style={{ textAlign:'left' }}>
+          {hasB ? (
+            <span style={{ fontWeight: exB?700:400, color: exB?'var(--forest)':'var(--ink)', fontSize:13 }}>
+              {isKo && bmB?.home && <><Flag team={bmB.home} size={12}/> {teamShort(bmB.home)} </>}
+              <span style={{ fontVariantNumeric:'tabular-nums', fontWeight:700 }}>{predB.h}{'–'}{predB.a}</span>
+              {isKo && bmB?.away && <> <Flag team={bmB.away} size={12}/> {teamShort(bmB.away)}</>}
+              {exB && ' ⭐'}
+            </span>
+          ) : <span style={{ color:'var(--ink-soft)', fontSize:12, fontStyle:'italic' }}>—</span>}
+        </div>
+      </div>
+    );
+  };
+
+  const renderGroupSection = (g) => {
+    const matches = GROUP_MATCHES.filter(m => m.group === g);
+    const agreements = matches.filter(m => agree((predsA?.group||{})[m.id], (predsB?.group||{})[m.id])).length;
+    return (
+      <div key={g} className="card" style={{ overflow:'hidden', marginBottom:8 }}>
+        <div style={{ padding:'10px 12px', background:'var(--cream-2)', borderBottom:'1px solid var(--line)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ fontWeight:700, fontSize:13 }}>Group {g}</span>
+          <span style={{ fontSize:11, color:'var(--forest)' }}>{agreements}/{matches.length} agree</span>
+        </div>
+        {matches.map(m => renderMatchRow(m.id, false, m.home, m.away))}
+      </div>
+    );
+  };
+
+  const koRounds = [
+    { label:'Round of 32', ids:range(73,88) },
+    { label:'Round of 16', ids:range(89,96) },
+    { label:'Quarter-Finals', ids:range(97,100) },
+    { label:'Semi-Finals', ids:[101,102] },
+    { label:'3rd Place Play-off', ids:[103] },
+    { label:'Final', ids:[104] },
+  ];
+
+  const bonusFields = [
+    { key:'winner', label:'🏆 Winner' },
+    { key:'runnerUp', label:'🥈 Runner-up' },
+    { key:'thirdPlace', label:'🥉 3rd Place' },
+    { key:'goldenBoot', label:'⚽ Golden Boot' },
+    { key:'tiebreak', label:'⏱ Tie-break' },
+  ];
+  const jokerFields = [
+    { key:'team', label:'🃏 Joker Team' },
+    { key:'group', label:'🃏 Joker Group', format: v => v ? 'Group '+v : null },
+  ];
+
+  return (
+    <div>
+      {/* Player selectors */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:20 }}>
+        <select value={playerA} onChange={e => setPlayerA(e.target.value)} style={selectStyle}>
+          <option value="">Select player 1…</option>
+          {sorted.filter(p => p !== playerB).map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <span style={{ fontSize:18, fontWeight:700, color:'var(--ink-soft)' }}>⚔️</span>
+        <select value={playerB} onChange={e => setPlayerB(e.target.value)} style={selectStyle}>
+          <option value="">Select player 2…</option>
+          {sorted.filter(p => p !== playerA).map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        {(playerA || playerB) && (
+          <button className="btn-ghost btn" style={{ fontSize:12 }} onClick={() => { setPlayerA(''); setPlayerB(''); }}>Clear</button>
+        )}
+      </div>
+
+      {(!playerA || !playerB) && (
+        <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--ink-soft)', fontSize:14, fontStyle:'italic' }}>
+          Select two participants above to compare their picks
+        </div>
+      )}
+
+      {playerA && playerB && scoreA && scoreB && (
+        <div className="fadein">
+          {/* Score summary */}
+          <div className="card" style={{ padding:'20px 24px', marginBottom:16 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr', alignItems:'center', gap:16 }}>
+              <div style={{ textAlign:'right' }}>
+                <div style={{ fontSize:20, fontWeight:700 }}>{playerA}</div>
+                {profiles[playerA] && <div style={{ fontSize:11, color:'var(--ink-soft)' }}>{profiles[playerA].team}</div>}
+                <div style={{ fontSize:36, fontWeight:700, color: scoreA.total >= scoreB.total ? 'var(--forest)' : 'var(--ink-soft)', lineHeight:1.1, marginTop:4 }}>{scoreA.total}</div>
+                <div style={{ fontSize:11, color:'var(--ink-soft)' }}>pts</div>
+              </div>
+              <div style={{ textAlign:'center' }}>
+                {scoreA.total === scoreB.total
+                  ? <div style={{ fontSize:13, fontWeight:700, color:'var(--ink-soft)' }}>TIED</div>
+                  : <div style={{ fontSize:13, fontWeight:700, color:'var(--forest)' }}>{scoreA.total > scoreB.total ? playerA : playerB} leads by {Math.abs(scoreA.total - scoreB.total)}</div>}
+                <div style={{ marginTop:12, fontSize:11, color:'var(--ink-soft)' }}>
+                  {[['Group','group'],['KO','ko'],['Bonus','bonus']].map(([l,k]) => (
+                    <div key={k} style={{ display:'grid', gridTemplateColumns:'1fr 60px 1fr', gap:4, marginBottom:2 }}>
+                      <span style={{ textAlign:'right', fontWeight: (scoreA.sectionPts?.[k]||0) > (scoreB.sectionPts?.[k]||0) ? 700 : 400 }}>{scoreA.sectionPts?.[k]||0}</span>
+                      <span style={{ textAlign:'center' }}>{l}</span>
+                      <span style={{ textAlign:'left', fontWeight: (scoreB.sectionPts?.[k]||0) > (scoreA.sectionPts?.[k]||0) ? 700 : 400 }}>{scoreB.sectionPts?.[k]||0}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ textAlign:'left' }}>
+                <div style={{ fontSize:20, fontWeight:700 }}>{playerB}</div>
+                {profiles[playerB] && <div style={{ fontSize:11, color:'var(--ink-soft)' }}>{profiles[playerB].team}</div>}
+                <div style={{ fontSize:36, fontWeight:700, color: scoreB.total >= scoreA.total ? 'var(--forest)' : 'var(--ink-soft)', lineHeight:1.1, marginTop:4 }}>{scoreB.total}</div>
+                <div style={{ fontSize:11, color:'var(--ink-soft)' }}>pts</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Column headers */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr', padding:'6px 12px', marginBottom:4, gap:8 }}>
+            <div style={{ textAlign:'right', fontWeight:700, fontSize:13 }}>{playerA}</div>
+            <div style={{ textAlign:'center', minWidth:140, fontSize:11, color:'var(--ink-soft)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Match</div>
+            <div style={{ textAlign:'left', fontWeight:700, fontSize:13 }}>{playerB}</div>
+          </div>
+
+          {/* Group matches */}
+          <div className="micro-caps" style={{ margin:'12px 0 8px' }}>Group Stage</div>
+          {GROUP_KEYS.map(g => renderGroupSection(g))}
+
+          {/* KO matches */}
+          <div className="micro-caps" style={{ margin:'16px 0 8px' }}>Knockout Stage</div>
+          {koRounds.map(({ label, ids }) => {
+            const validIds = ids.filter(mId => {
+              const ab = actualBracket[mId];
+              return ab?.home || ab?.away || (predsA && bracketA[mId]?.home) || (predsB && bracketB[mId]?.home);
+            });
+            if (!validIds.length) return null;
+            const agreements = validIds.filter(mId => agree((predsA?.ko||{})[mId], (predsB?.ko||{})[mId])).length;
+            return (
+              <div key={label} className="card" style={{ overflow:'hidden', marginBottom:8 }}>
+                <div style={{ padding:'10px 12px', background:'var(--cream-2)', borderBottom:'1px solid var(--line)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontWeight:700, fontSize:13 }}>{label}</span>
+                  <span style={{ fontSize:11, color:'var(--forest)' }}>{agreements}/{validIds.length} agree</span>
+                </div>
+                {validIds.map(mId => {
+                  const ab = actualBracket[mId];
+                  const home = ab?.home || bracketA[mId]?.home || bracketB[mId]?.home || 'TBD';
+                  const away = ab?.away || bracketA[mId]?.away || bracketB[mId]?.away || 'TBD';
+                  return renderMatchRow(mId, true, home, away);
+                })}
+              </div>
+            );
+          })}
+
+          {/* Bonus comparison */}
+          <div className="micro-caps" style={{ margin:'16px 0 8px' }}>Bonus Picks</div>
+          <div className="card" style={{ overflow:'hidden', marginBottom:8 }}>
+            {[...bonusFields.map(f => ({ ...f, source:'bonus' })), ...jokerFields.map(f => ({ ...f, source:'joker' }))].map(({ key, label, source, format }) => {
+              const vA = source === 'bonus' ? (predsA?.bonus||{})[key] : (predsA?.joker||{})[key];
+              const vB = source === 'bonus' ? (predsB?.bonus||{})[key] : (predsB?.joker||{})[key];
+              const dA = format ? format(vA) : vA;
+              const dB = format ? format(vB) : vB;
+              const match = dA && dB && dA === dB;
+              return (
+                <div key={key} style={{ display:'grid', gridTemplateColumns:'1fr 120px 1fr', borderBottom:'1px solid var(--line-soft)', padding:'8px 12px', background: match ? 'rgba(27,94,63,0.04)' : 'transparent', gap:8, alignItems:'center' }}>
+                  <div style={{ textAlign:'right', fontSize:13, fontWeight: match?600:400 }}>{dA || <span style={{ color:'var(--ink-soft)', fontStyle:'italic' }}>—</span>}</div>
+                  <div style={{ textAlign:'center', fontSize:11, color:'var(--ink-soft)' }}>{label}{match && ' ✓'}</div>
+                  <div style={{ textAlign:'left', fontSize:13, fontWeight: match?600:400 }}>{dB || <span style={{ color:'var(--ink-soft)', fontStyle:'italic' }}>—</span>}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -6128,7 +6371,7 @@ function AdminKoSection({ results, setKoResult, setKoTeam, setKoPkWinner, onSave
   );
 }
 
-function AdminParticipantsSection({ participants, allPredictions, profiles, onSavePredictions }) {
+function AdminParticipantsSection({ participants, allPredictions, profiles, onSavePredictions, onRenameUser }) {
   const [selected, setSelected] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -6180,12 +6423,70 @@ function AdminParticipantsSection({ participants, allPredictions, profiles, onSa
       </div>
 
       {selected && preds && (
+        <RenameableParticipantCard
+          name={selected}
+          profile={profiles[selected]}
+          preds={preds}
+          bonus={bonus}
+          joker={joker}
+          onRenameUser={onRenameUser}
+          onSetSelected={setSelected}
+          setBonus={setBonus}
+          setJokerField={setJokerField}
+        />
+      )}
+    </div>
+  );
+}
+
+function RenameableParticipantCard({ name, profile, preds, bonus, joker, onRenameUser, onSetSelected, setBonus, setJokerField }) {
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState(name);
+  const [renaming, setRenaming] = useState(false);
+
+  const handleRename = async () => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === name) { setEditingName(false); setNewName(name); return; }
+    setRenaming(true);
+    await onRenameUser(name, trimmed);
+    setRenaming(false);
+    setEditingName(false);
+    onSetSelected(trimmed);
+  };
+
+  return (
         <div className="card" style={{ padding: 22, maxWidth: 520 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-            <div>
-              <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>{selected}</div>
-              {profiles[selected] && (
-                <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{profiles[selected].team} · {profiles[selected].country}</div>
+            <div style={{ flex: 1 }}>
+              {!editingName ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>{name}</div>
+                  <button onClick={() => { setEditingName(true); setNewName(name); }}
+                    style={{ fontSize: 11, color: 'var(--ink-soft)', background: 'none', border: '1px solid var(--line)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>
+                    ✏️ Rename
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') { setEditingName(false); setNewName(name); } }}
+                    autoFocus
+                    style={{ fontSize: 16, fontWeight: 700, padding: '4px 8px', border: '1px solid var(--burgundy)', borderRadius: 4, fontFamily: 'inherit', width: 200 }}
+                  />
+                  <button onClick={handleRename} disabled={renaming}
+                    className="btn" style={{ background: 'var(--forest)', fontSize: 12, padding: '4px 12px' }}>
+                    {renaming ? 'Saving…' : 'Save'}
+                  </button>
+                  <button onClick={() => { setEditingName(false); setNewName(name); }}
+                    className="btn-ghost btn" style={{ fontSize: 12, padding: '4px 10px' }}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {profile && (
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>{profile.team} · {profile.country}</div>
               )}
             </div>
           </div>
@@ -6259,14 +6560,6 @@ function AdminParticipantsSection({ participants, allPredictions, profiles, onSa
             Changes save automatically as you type.
           </div>
         </div>
-      )}
-
-      {!selected && (
-        <div style={{ fontSize: 13, color: 'var(--ink-soft)', fontStyle: 'italic' }}>
-          Select a participant above to edit their picks.
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -6768,10 +7061,33 @@ function AdminView({ config, setConfig, results, onSave, participants, allPredic
           allPredictions={allPredictions}
           profiles={profiles}
           onSavePredictions={async (name, newPreds) => {
-            // Save to shared storage under that participant's key
             await storage.set(PRED_PREFIX + name, newPreds, true);
             try { localStorage.setItem('wc26_pred_' + name, JSON.stringify(newPreds)); } catch {}
             setAllPredictions(prev => ({ ...prev, [name]: newPreds }));
+          }}
+          onRenameUser={async (oldName, newName) => {
+            if (!newName || newName === oldName) return;
+            // Copy predictions to new key
+            const preds = allPredictions[oldName] || {};
+            await storage.set(PRED_PREFIX + newName, preds, true);
+            await storage.set(PRED_PREFIX + oldName, null, true);
+            try { await storage.set(PRED_PREFIX + oldName, '', true); } catch {}
+            // Update participants list
+            const newList = participants.map(p => p === oldName ? newName : p);
+            await storage.set(PART_LIST_KEY, newList, true);
+            setParticipants(newList);
+            // Update profiles
+            const newProfs = { ...profiles };
+            if (newProfs[oldName]) { newProfs[newName] = newProfs[oldName]; delete newProfs[oldName]; }
+            await storage.set(PROFILES_KEY, newProfs, true);
+            setProfiles(newProfs);
+            // Update allPredictions
+            const newAll = { ...allPredictions };
+            newAll[newName] = newAll[oldName];
+            delete newAll[oldName];
+            setAllPredictions(newAll);
+            // Delete old prediction key from Firestore
+            try { await storage.set(PRED_PREFIX + oldName, undefined, true); } catch {}
           }}
         />
       )}
