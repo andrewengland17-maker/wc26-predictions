@@ -389,8 +389,8 @@ const storage = {
   },
   async getJSON(key, shared = false) { const v = await this.get(key, shared); if (!v) return null; try { return JSON.parse(v); } catch { return v; } },
   async clearAll() {
-    try { const snap = await db.collection('wc26').get(); for (const d of snap.docs) { try { await d.ref.delete(); } catch {} } } catch {}
-    try { Object.keys(localStorage).filter(k => k.startsWith('wc26')).forEach(k => localStorage.removeItem(k)); } catch {}
+    try { const snap = await db.collection('wc26').get(); for (const d of snap.docs) { if (d.id.startsWith(NS)) { try { await d.ref.delete(); } catch {} } } } catch {}
+    try { Object.keys(localStorage).filter(k => k.startsWith('wc26_' + NS)).forEach(k => localStorage.removeItem(k)); } catch {}
   }
 };
 
@@ -2836,6 +2836,13 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
             style={{ color: view === 'field' ? 'var(--ink)' : 'var(--forest)', borderBottomColor: view === 'field' ? 'var(--forest)' : 'transparent' }}
           >
             <BarChart3 size={14} /> The Field
+          </button>
+        )}
+        {locked && (
+          <button className={`tab-btn ${view === 'browse' ? 'active' : ''}`} onClick={() => setView('browse')}
+            style={{ color: view === 'browse' ? 'var(--ink)' : 'var(--forest)', borderBottomColor: view === 'browse' ? 'var(--forest)' : 'transparent' }}
+          >
+            <Eye size={14} /> Browse Picks
           </button>
         )}
         <button className={`tab-btn ${view === 'leaderboard' ? 'active' : ''}`} onClick={() => setView('leaderboard')}>
