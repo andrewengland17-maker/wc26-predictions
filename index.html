@@ -1911,9 +1911,14 @@ const styles = `
   }
 `;
 
-const Flag = ({ team, size = 18 }) => (
-  <span style={{ fontSize: size, lineHeight: 1, display: 'inline-block' }}>{TEAM_FLAGS[team] || '⚽'}</span>
-);
+const Flag = ({ team, size = 18 }) => {
+  const emoji = TEAM_FLAGS[team];
+  if (!emoji) return null;
+  // Convert emoji to Twemoji URL (works on all platforms including Windows/Chrome)
+  const cp = [...emoji].map(c => c.codePointAt(0).toString(16)).join('-');
+  const url = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/' + cp + '.svg';
+  return <img src={url} alt={emoji} style={{ width:size, height:size, verticalAlign:'middle', display:'inline-block' }} />;
+};
 
 // ──────────────────────────────────────────────────────────────────────
 // MAIN APP
@@ -2118,99 +2123,237 @@ function App() {
 // BROWSE PICKS
 // ──────────────────────────────────────────────────────────────────────
 function BrowseView({ participants, allPredictions, results, profiles, currentUser }) {
+  const [browseTab, setBrowseTab] = useState('participant');
   const [selected, setSelected] = useState(null);
 
-  const sortedParticipants = useMemo(() => {
-    return [...participants].sort((a, b) => a.localeCompare(b));
-  }, [participants]);
-
+  const sortedParticipants = useMemo(() => [...participants].sort((a, b) => a.localeCompare(b)), [participants]);
   const viewPreds = selected ? (allPredictions[selected] || { group: {}, ko: {} }) : null;
 
   return (
     <div>
-      <SectionHeader
-        kicker={`${participants.length} participants`}
-        title="Browse Picks"
-        subtitle="Select a participant to view their full predictions. Available once the competition is locked."
-      />
+      <SectionHeader kicker={participants.length + ' participants'} title="Browse Picks"
+        subtitle="View predictions by participant or by match." />
 
-      {/* Participant grid */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16, marginBottom: 20 }}>
-        {sortedParticipants.map(p => {
-          const prof = profiles[p] || {};
-          const isMe = p === currentUser;
-          const isSelected = p === selected;
-          return (
-            <button
-              key={p}
-              className="pill"
-              onClick={() => setSelected(isSelected ? null : p)}
-              style={{
-                cursor: 'pointer',
-                background: isSelected ? 'var(--ink)' : isMe ? 'rgba(27,94,63,0.1)' : 'var(--cream-2)',
-                color: isSelected ? 'var(--cream)' : 'var(--ink)',
-                border: `1px solid ${isSelected ? 'var(--ink)' : isMe ? 'var(--forest)' : 'var(--line)'}`,
-                fontWeight: isSelected ? 700 : 400,
-                padding: '6px 12px',
-                fontSize: 13,
-              }}
-              title={prof.team ? `${prof.team} · ${prof.country}` : ''}
-            >
-              {p}{isMe ? ' (you)' : ''}
-            </button>
-          );
-        })}
+      <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--line)', marginTop:16, marginBottom:20 }}>
+        {[['participant','\uD83D\uDC64 By Participant'],['match','\u26BD By Match']].map(([key,label]) => (
+          <button key={key} onClick={() => { setBrowseTab(key); setSelected(null); }}
+            style={{ padding:'8px 18px', fontSize:13, fontWeight:browseTab===key?700:400, background:'none', border:'none', cursor:'pointer',
+              color:browseTab===key?'var(--ink)':'var(--ink-soft)',
+              borderBottom:browseTab===key?'2px solid var(--burgundy)':'2px solid transparent', marginBottom:-1 }}>
+            {label}
+          </button>
+        ))}
       </div>
 
-      {!selected && (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ink-soft)', fontSize: 14, fontStyle: 'italic' }}>
-          Tap a name above to view their picks
+      {browseTab === 'participant' && <>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:20 }}>
+          {sortedParticipants.map(p => {
+            const isMe = p === currentUser;
+            const isSel = p === selected;
+            return (
+              <button key={p} className="pill"
+                onClick={() => setSelected(isSel ? null : p)}
+                style={{ cursor:'pointer',
+                  background:isSel?'var(--ink)':isMe?'rgba(27,94,63,0.1)':'var(--cream-2)',
+                  color:isSel?'var(--cream)':'var(--ink)',
+                  border:`1px solid ${isSel?'var(--ink)':isMe?'var(--forest)':'var(--line)'}`,
+                  fontWeight:isSel?700:400, padding:'6px 12px', fontSize:13 }}>
+                {p}{isMe?' (you)':''}</button>
+            );
+          })}
         </div>
-      )}
-
-      {selected && viewPreds && (
-        <div className="fadein">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-            <div>
-              <div className="display" style={{ fontSize: 22, fontWeight: 700 }}>{selected}</div>
-              {profiles[selected] && (
-                <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
-                  {profiles[selected].team && profiles[selected].team + ' · '}
-                  {profiles[selected].country}
-                </div>
-              )}
+        {!selected && <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--ink-soft)', fontSize:14, fontStyle:'italic' }}>Tap a name above to view their picks</div>}
+        {selected && viewPreds && (
+          <div className="fadein">
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+              <div>
+                <div className="display" style={{ fontSize:22, fontWeight:700 }}>{selected}</div>
+                {profiles[selected] && <div style={{ fontSize:12, color:'var(--ink-soft)' }}>{profiles[selected].team && profiles[selected].team+' \u00B7 '}{profiles[selected].country}</div>}
+              </div>
+              <button className="btn" style={{ fontSize:12, padding:'6px 12px', background:'var(--forest)', color:'white', display:'flex', alignItems:'center', gap:5 }}
+                onClick={() => printPicks(viewPreds, selected, profiles)}>\uD83D\uDDB1\uFE0F Download as PDF</button>
             </div>
-            <button
-              className="btn"
-              style={{ fontSize: 12, padding: '6px 12px', background: 'var(--forest)', color: 'white', display: 'flex', alignItems: 'center', gap: 5 }}
-              onClick={() => printPicks(viewPreds, selected, profiles)}
-              title="Download this person's picks as PDF"
-            >
-              🖨️ Download as PDF
-            </button>
+            <BrowseGroupStage predictions={viewPreds} results={results} />
+            <div style={{ marginTop:20 }}>
+              <div className="micro-caps" style={{ marginBottom:10 }}>Knockout Bracket</div>
+              <BracketView predictions={viewPreds} onSave={() => {}} results={results} locked={true} />
+            </div>
+            <BrowseBonus predictions={viewPreds} />
           </div>
+        )}
+      </>}
 
-          {/* Group stage picks — read only */}
-          <BrowseGroupStage predictions={viewPreds} results={results} />
-
-          {/* Knockout picks — read only */}
-          <div style={{ marginTop: 20 }}>
-            <div className="micro-caps" style={{ marginBottom: 10 }}>Knockout Bracket</div>
-            <BracketView
-              predictions={viewPreds}
-              onSave={() => {}}
-              results={results}
-              locked={true}
-            />
-          </div>
-
-          {/* Bonus picks */}
-          <BrowseBonus predictions={viewPreds} />
-        </div>
+      {browseTab === 'match' && (
+        <MatchPicksView participants={participants} allPredictions={allPredictions}
+          results={results} selected={selected} setSelected={setSelected} />
       )}
     </div>
   );
 }
+
+function MatchPicksView({ participants, allPredictions, results, selected, setSelected }) {
+  const [openSection, setOpenSection] = useState('A');
+
+  const actualBracket = useMemo(() => {
+    const { bracket: ab } = buildActualBracket(results.group || {}, results.ko || {});
+    return ab;
+  }, [results]);
+
+  const matchTeams = (mId, isKo) => {
+    if (!isKo) {
+      const m = GROUP_MATCHES.find(gm => gm.id === mId);
+      return m ? { home: m.home, away: m.away } : { home: '?', away: '?' };
+    }
+    const ab = actualBracket[mId];
+    return { home: ab?.home || 'TBD', away: ab?.away || 'TBD' };
+  };
+
+  const koRounds = [
+    { label: 'Round of 32', ids: range(73,88) },
+    { label: 'Round of 16', ids: range(89,96) },
+    { label: 'Quarter-Finals', ids: range(97,100) },
+    { label: 'Semi-Finals', ids: [101,102] },
+    { label: '3rd Place Play-off', ids: [103] },
+    { label: 'Final', ids: [104] },
+  ];
+
+  const renderSection = (sectionKey, matchIds, isKo) => {
+    const isOpen = openSection === sectionKey;
+    const resultCount = matchIds.filter(mId => {
+      const r = isKo ? (results.ko||{})[mId] : (results.group||{})[mId];
+      return r && r.h !== '' && r.h != null;
+    }).length;
+    return (
+      <div key={sectionKey} className="card" style={{ overflow:'hidden', marginBottom:8 }}>
+        <button onClick={() => setOpenSection(isOpen ? null : sectionKey)}
+          style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', background:'none', border:'none', padding:'13px 16px', cursor:'pointer' }}>
+          <span style={{ fontWeight:600, fontSize:14 }}>{isKo ? sectionKey : 'Group '+sectionKey}</span>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {resultCount > 0 && <span className="pill pill-success" style={{ fontSize:11 }}>{resultCount}/{matchIds.length} resulted</span>}
+            {isOpen ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
+          </div>
+        </button>
+        {isOpen && (
+          <div className="fadein" style={{ borderTop:'1px solid var(--line)' }}>
+            {matchIds.map(mId => {
+              const { home, away } = matchTeams(mId, isKo);
+              const actual = isKo ? (results.ko||{})[mId] : (results.group||{})[mId];
+              const hasResult = actual && actual.h !== '' && actual.h != null && actual.a !== '' && actual.a != null;
+              const isSel = selected === mId;
+              return (
+                <div key={mId}>
+                  <button onClick={() => setSelected(isSel ? null : mId)}
+                    style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
+                      padding:'10px 16px', background:isSel?'var(--cream-2)':'white', border:'none',
+                      borderBottom:'1px solid var(--line-soft)', cursor:'pointer', textAlign:'left' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontSize:11, color:'var(--ink-soft)', width:28 }}>M{mId}</span>
+                      <Flag team={home} size={13}/><span style={{ fontSize:13, fontWeight:500 }}>{teamShort(home)}</span>
+                      <span style={{ fontSize:11, color:'var(--ink-soft)', margin:'0 2px' }}>vs</span>
+                      <Flag team={away} size={13}/><span style={{ fontSize:13, fontWeight:500 }}>{teamShort(away)}</span>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      {hasResult && <span style={{ fontSize:13, fontWeight:700, color:'var(--forest)' }}>{actual.h}{'–'}{actual.a}</span>}
+                      <span style={{ fontSize:11, color:'var(--forest)' }}>{isSel?'\u25B2 Hide':'\u25BC All picks'}</span>
+                    </div>
+                  </button>
+                  {isSel && <MatchDetailPanel mId={mId} isKo={isKo} home={home} away={away}
+                    actual={actual} hasResult={hasResult} participants={participants} allPredictions={allPredictions} />}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {GROUP_KEYS.map(g => renderSection(g, GROUP_MATCHES.filter(m => m.group===g).map(m => m.id), false))}
+      <div className="micro-caps" style={{ margin:'16px 0 10px' }}>Knockout Stage</div>
+      {koRounds.map(({label,ids}) => renderSection(label, ids, true))}
+    </div>
+  );
+}
+
+function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participants, allPredictions }) {
+  const rows = useMemo(() => {
+    return participants.map(p => {
+      const preds = allPredictions[p] || {};
+      const pred = isKo ? (preds.ko||{})[mId] : (preds.group||{})[mId];
+      const hasPred = pred && pred.h !== '' && pred.h != null && pred.a !== '' && pred.a != null;
+      let pts = 0, isExact = false;
+      if (hasResult && hasPred) {
+        const scored = scoreMatch(pred, actual, home, away, !isKo);
+        pts = scored.total;
+        isExact = parseInt(pred.h) === parseInt(actual.h) && parseInt(pred.a) === parseInt(actual.a);
+      }
+      // For KO matches, derive the user's predicted teams for this slot from their bracket
+      let predHome = null, predAway = null;
+      if (isKo) {
+        const { bracket: userBracket } = buildBracket(preds.group || {}, preds.ko || {});
+        predHome = userBracket[mId]?.home || null;
+        predAway = userBracket[mId]?.away || null;
+      }
+      return { name:p, pred, hasPred, pts, isExact, predHome, predAway };
+    }).sort((a,b) => hasResult ? (b.pts - a.pts || a.name.localeCompare(b.name)) : a.name.localeCompare(b.name));
+  }, [participants, allPredictions, mId, isKo, actual, hasResult, home, away]);
+
+  const exactCount = rows.filter(r => r.isExact).length;
+
+  return (
+    <div className="fadein" style={{ background:'var(--cream-2)', borderBottom:'1px solid var(--line)' }}>
+      <div style={{ padding:'10px 16px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <span style={{ fontSize:11, color:'var(--ink-soft)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase' }}>
+          {participants.length} predictions
+        </span>
+        <span style={{ fontSize:11, color:'var(--ink-soft)' }}>
+          {hasResult ? (exactCount > 0 ? exactCount+' exact \u2B50' : 'sorted by pts') : 'result pending \u00B7 a\u2013z'}
+        </span>
+      </div>
+      <div style={{ padding:'0 16px 10px' }}>
+        {rows.map(({ name, pred, hasPred, pts, isExact, predHome, predAway }) => (
+          <div key={name} style={{ borderBottom:'1px solid var(--line-soft)', padding:'7px 0' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ width:20, fontSize:14, textAlign:'center' }}>
+                  {isExact ? '\u2B50' : hasResult && pts > 0 ? '\u2713' : hasResult ? '\u2715' : ''}
+                </span>
+                <span style={{ fontSize:13, fontWeight:isExact?700:400 }}>{name}</span>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                {!isKo && (
+                  <span style={{ fontSize:14, fontWeight:700, color:'var(--forest)', fontVariantNumeric:'tabular-nums', minWidth:40, textAlign:'center' }}>
+                    {hasPred ? pred.h+'\u2013'+pred.a : <span style={{ color:'var(--ink-soft)', fontStyle:'italic', fontSize:12 }}>\u2014</span>}
+                  </span>
+                )}
+                {!isKo && !hasPred && (
+                  <span style={{ fontSize:12, color:'var(--ink-soft)', fontStyle:'italic', minWidth:40, textAlign:'center' }}>\u2014</span>
+                )}
+                {hasResult && (
+                  <span className={'pill '+(pts>0?'pill-success':'')} style={{ fontSize:11, minWidth:32, textAlign:'center' }}>
+                    {pts > 0 ? '+'+pts : '0'}
+                  </span>
+                )}
+              </div>
+            </div>
+            {isKo && (predHome || predAway) && (
+              <div style={{ display:'flex', alignItems:'center', gap:4, marginLeft:28, marginTop:2, fontSize:11, color:'var(--ink-soft)' }}>
+                <Flag team={predHome} size={11}/>
+                <span>{predHome ? teamShort(predHome) : 'TBD'}</span>
+                {hasPred && <span style={{ fontWeight:700, color:'var(--forest)', margin:'0 2px' }}>{ pred.h + '–' + pred.a }</span>}
+                <Flag team={predAway} size={11}/>
+                <span>{predAway ? teamShort(predAway) : 'TBD'}</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 function BrowseGroupStage({ predictions, results }) {
   const [openGroup, setOpenGroup] = useState(null);
