@@ -3386,7 +3386,7 @@ function LoginScreen({ onLogin, participants, profiles }) {
   const [team, setTeam] = useState('');
   const [location, setLocation] = useState('');
   const [error, setError] = useState('');
-  const [step, setStep] = useState('name'); // 'name' | 'pin-new' | 'pin-returning' | 'details'
+  const [step, setStep] = useState('name'); // 'name' | 'pin-new' | 'pin-returning' | 'details' | 'complete-profile'
 
   const needsCountry = COMP.fields.includes('country');
   const needsTeam = COMP.fields.includes('team');
@@ -3397,11 +3397,16 @@ function LoginScreen({ onLogin, participants, profiles }) {
   const isReturning = trimmedName && participants.includes(trimmedName);
   const pinValid = /^\d{4}$/.test(pin);
 
+  // Check if returning user has incomplete profile (missing team/country)
+  const profileIncomplete = isReturning && needsDetails && (
+    (needsTeam && !profiles[trimmedName]?.team) ||
+    (needsCountry && !profiles[trimmedName]?.country)
+  );
+
   const handleNameNext = () => {
     if (!trimmedName) return;
     setError('');
     if (isReturning) {
-      // If returning user has no stored PIN, send to pin-new to set a fresh one
       const hasPin = !!(profiles[trimmedName] && profiles[trimmedName].pin);
       setStep(hasPin ? 'pin-returning' : 'pin-new');
     } else {
@@ -3418,6 +3423,15 @@ function LoginScreen({ onLogin, participants, profiles }) {
     setStep('pin-new');
   };
 
+  const handleCompleteProfileNext = () => {
+    if (needsTeam && !team) { setError('Please select your team.'); return; }
+    if (needsCountry && !country) { setError('Please select your country.'); return; }
+    setError('');
+    // Save updated profile with team/country merged in, then log in
+    const updatedProfile = { ...(profiles[trimmedName] || {}), team, country };
+    onLogin(trimmedName, updatedProfile);
+  };
+
   const handlePinSubmit = () => {
     if (!pinValid) { setError('PIN must be exactly 4 digits.'); return; }
     if (step === 'pin-returning') {
@@ -3425,11 +3439,24 @@ function LoginScreen({ onLogin, participants, profiles }) {
       if (storedPin && storedPin !== pin) { setError('Incorrect PIN. Please try again.'); setPin(''); return; }
     }
     setError('');
-    // Returning user with no stored PIN: pass profile with new PIN so it gets saved
     const isPinReset = isReturning && step === 'pin-new' && !(profiles[trimmedName]?.pin);
-    const profileToSave = isPinReset
-      ? { ...(profiles[trimmedName] || {}), pin }
-      : isReturning ? null : { country, team, location, pin };
+    if (isPinReset) {
+      // Save new PIN then check if profile needs completing
+      if (profileIncomplete) {
+        // Save the PIN first, then go to complete-profile
+        onLogin(trimmedName, { ...(profiles[trimmedName] || {}), pin });
+        setStep('complete-profile');
+        return;
+      }
+      onLogin(trimmedName, { ...(profiles[trimmedName] || {}), pin });
+      return;
+    }
+    if (isReturning && profileIncomplete) {
+      // PIN ok — go to complete profile step before logging in
+      setStep('complete-profile');
+      return;
+    }
+    const profileToSave = isReturning ? null : { country, team, location, pin };
     onLogin(trimmedName, profileToSave);
   };
 
@@ -3528,6 +3555,39 @@ function LoginScreen({ onLogin, participants, profiles }) {
                 <button className="btn btn-ghost" onClick={() => { setStep('name'); setError(''); }}>← Back</button>
                 <button className="btn" style={{ flex: 1 }} onClick={handleDetailsNext}>Continue →</button>
               </div>
+            </>
+          )}
+
+          {/* Complete profile step — for returning users missing team/country */}
+          {step === 'complete-profile' && (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 12 }}>
+                Welcome back, <strong>{trimmedName}</strong>. We're missing a few profile details — please fill these in to continue.
+              </div>
+              {needsTeam && !profiles[trimmedName]?.team && (
+                <>
+                  <label className="micro-caps" style={{ display: 'block', marginBottom: 6 }}>Team</label>
+                  <select value={team} onChange={e => { setTeam(e.target.value); setError(''); }}
+                    style={{ ...selectStyle, marginBottom: 16 }}>
+                    <option value="">Select your team…</option>
+                    {(COMPETITION_ID === 'gcfo-india' ? GCFO_INDIA_TEAMS : SCB_TEAMS).map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </>
+              )}
+              {needsCountry && !profiles[trimmedName]?.country && (
+                <>
+                  <label className="micro-caps" style={{ display: 'block', marginBottom: 6 }}>Country</label>
+                  <select value={country} onChange={e => { setCountry(e.target.value); setError(''); }}
+                    style={{ ...selectStyle, marginBottom: 16 }}>
+                    <option value="">Select your country…</option>
+                    {SCB_COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </>
+              )}
+              {error && <div style={{ color: 'var(--burgundy)', fontSize: 13, marginBottom: 8 }}>{error}</div>}
+              <button className="btn" style={{ width: '100%', marginTop: 4 }} onClick={handleCompleteProfileNext}>
+                Save & Continue →
+              </button>
             </>
           )}
 
