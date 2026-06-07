@@ -403,7 +403,7 @@ const GROUPS = {
   A: ['Mexico', 'South Africa', 'South Korea', 'Czech Republic'],
   B: ['Canada', 'Bosnia and Herzegovina', 'Qatar', 'Switzerland'],
   C: ['Brazil', 'Morocco', 'Haiti', 'Scotland'],
-  D: ['United States', 'Paraguay', 'Australia', 'Türkiye'],
+  D: ['United States', 'Paraguay', 'Australia', 'Turkiye'],
   E: ['Germany', 'Curaçao', 'Ivory Coast', 'Ecuador'],
   F: ['Netherlands', 'Japan', 'Sweden', 'Tunisia'],
   G: ['Belgium', 'Egypt', 'Iran', 'New Zealand'],
@@ -522,7 +522,7 @@ const TEAM_FLAGS = {
   'Mexico':'🇲🇽','South Africa':'🇿🇦','South Korea':'🇰🇷','Czech Republic':'🇨🇿',
   'Canada':'🇨🇦','Bosnia and Herzegovina':'🇧🇦','Qatar':'🇶🇦','Switzerland':'🇨🇭',
   'Brazil':'🇧🇷','Morocco':'🇲🇦','Haiti':'🇭🇹','Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿',
-  'United States':'🇺🇸','Paraguay':'🇵🇾','Australia':'🇦🇺','Türkiye':'🇹🇷',
+  'United States':'🇺🇸','Paraguay':'🇵🇾','Australia':'🇦🇺','Turkiye':'🇹🇷',
   'Germany':'🇩🇪','Curaçao':'🇨🇼','Ivory Coast':'🇨🇮','Ecuador':'🇪🇨',
   'Netherlands':'🇳🇱','Japan':'🇯🇵','Sweden':'🇸🇪','Tunisia':'🇹🇳',
   'Belgium':'🇧🇪','Egypt':'🇪🇬','Iran':'🇮🇷','New Zealand':'🇳🇿',
@@ -544,7 +544,7 @@ const FIFA_RANKINGS = {
   'Brazil': 6, 'Netherlands': 7, 'Morocco': 8, 'Belgium': 9, 'Germany': 10,
   'Croatia': 11, 'Colombia': 13, 'Senegal': 14, 'Mexico': 15,
   'United States': 16, 'Uruguay': 17, 'Japan': 18, 'Switzerland': 19,
-  'Iran': 21, 'Türkiye': 22, 'Ecuador': 23, 'Austria': 24, 'South Korea': 25,
+  'Iran': 21, 'Turkiye': 22, 'Ecuador': 23, 'Austria': 24, 'South Korea': 25,
   'Australia': 27, 'Algeria': 28, 'Egypt': 29, 'Canada': 30,
   'Norway': 31, 'Panama': 33, 'Ivory Coast': 34, 'Sweden': 38,
   'Paraguay': 40, 'Czech Republic': 41, 'Scotland': 43, 'Tunisia': 44,
@@ -1780,7 +1780,7 @@ const computeMatchBracketPts = (matchId, userBracket, actualDerivedBracket, actu
 
 
 // ── Competition config ────────────────────────────────────────────────
-const COMPETITION_ID = 'scb-treasury';
+const COMPETITION_ID = window.__COMPETITION_ID || 'scb-treasury';
 
 const COMPETITION_CONFIG = {
   'scb-treasury': {
@@ -1797,6 +1797,12 @@ const COMPETITION_CONFIG = {
     name: 'Asia Circle WC26',
     subtitle: 'Prediction Competition',
     fields: ['name'],
+  },
+  'gcfo-india': {
+    name: 'GCFO India WC26',
+    subtitle: 'Prediction Competition',
+    fields: ['name', 'team', 'location'],
+    namePlaceholder: 'Use your name as per Outlook',
   },
 };
 
@@ -1815,6 +1821,24 @@ const SCB_TEAMS = [
   'TM', 'Capital', 'COO', 'Liquidity', 'RRP',
   'CRO', 'CFO', 'GCFO IN', 'CPM', 'Non-Treasury',
 ];
+
+const GCFO_INDIA_TEAMS = [
+  'Business Performance Change',
+  'Capital',
+  'Central Management',
+  'Country Regulatory Reporting',
+  'Financial Controllorship',
+  'FRG',
+  'Investments',
+  'Ledger Operations',
+  'Liquidity / IRRBB',
+  'Product Control',
+  'Tax CoE',
+  'Treasury IN',
+  'Other',
+];
+
+const GCFO_INDIA_LOCATIONS = ['Bangalore', 'Chennai'];
 
 const SCB_COUNTRIES = [
   'Australia','Bahrain','Bangladesh','Brunei','Botswana',
@@ -1982,16 +2006,24 @@ function App() {
     if (!trimmed) return;
     await storage.set(CURRENT_USER_KEY, trimmed, false);
     setCurrentUser(trimmed);
-    // Update participant list
-    let newList = participants;
-    if (!participants.includes(trimmed)) {
-      newList = [...participants, trimmed];
+
+    // Always re-read from Firestore immediately before writing — never trust stale local state
+    const latestList = (await storage.getJSON(PART_LIST_KEY, true)) || [];
+    const latestProfiles = (await storage.getJSON(PROFILES_KEY, true)) || {};
+
+    // Sync local state with what Firestore actually has
+    if (latestList.length > participants.length) setParticipants(latestList);
+
+    // Add to participant list only if not already present
+    if (!latestList.includes(trimmed)) {
+      const newList = [...latestList, trimmed];
       await storage.set(PART_LIST_KEY, newList, true);
       setParticipants(newList);
     }
-    // Save profile if provided (new registration) — includes PIN
+
+    // Save profile if provided (new registration or PIN reset) — merge with Firestore data
     if (profile) {
-      const newProfiles = { ...profiles, [trimmed]: profile };
+      const newProfiles = { ...latestProfiles, [trimmed]: { ...(latestProfiles[trimmed]||{}), ...profile } };
       setProfiles(newProfiles);
       await storage.set(PROFILES_KEY, newProfiles, true);
     }
@@ -2081,6 +2113,16 @@ function App() {
             allPredictions={{ ...allPredictions, ...(currentUser ? { [currentUser]: predictions } : {}) }}
             results={results}
             profiles={profiles}
+            showStillAlive={!!config.showStillAlive}
+          />
+        )}
+        {view === 'simulator' && (
+          <SimulatorView
+            participants={participants}
+            allPredictions={allPredictions}
+            results={results}
+            profiles={profiles}
+            currentUser={currentUser}
           />
         )}
         {view === 'browse' && locked && (
@@ -2110,6 +2152,8 @@ function App() {
             allPredictions={allPredictions}
             setAllPredictions={setAllPredictions}
             profiles={profiles}
+            setParticipants={setParticipants}
+            setProfiles={setProfiles}
           />
         )}
       </main>
@@ -2118,6 +2162,632 @@ function App() {
   );
 }
 
+
+
+// ──────────────────────────────────────────────────────────────────────
+// TOURNAMENT SIMULATOR — Elo model + Monte Carlo engine
+// ──────────────────────────────────────────────────────────────────────
+
+const GB_LOOKUP = {
+  'Mbappe':'France','Kylian Mbappe':'France',
+  'Griezmann':'France','Antoine Griezmann':'France',
+  'Dembele':'France','Ousmane Dembele':'France',
+  'Thuram':'France','Marcus Thuram':'France',
+  'Kane':'England','Harry Kane':'England',
+  'Bellingham':'England','Jude Bellingham':'England',
+  'Saka':'England','Bukayo Saka':'England',
+  'Foden':'England','Phil Foden':'England',
+  'Rashford':'England','Marcus Rashford':'England',
+  'Palmer':'England','Cole Palmer':'England',
+  'Haaland':'Norway','Erling Haaland':'Norway',
+  'Srloth':'Norway','Sorloth':'Norway','Alexander Srloth':'Norway',
+  'Vinicius':'Brazil','Vinicius Jr':'Brazil','Vinicius Junior':'Brazil',
+  'Neymar':'Brazil','Raphinha':'Brazil','Endrick':'Brazil','Rodrygo':'Brazil',
+  'Cunha':'Brazil','Matheus Cunha':'Brazil','Martinelli':'Brazil','Gabriel Martinelli':'Brazil',
+  'Messi':'Argentina','Lionel Messi':'Argentina',
+  'Lautaro':'Argentina','Lautaro Martinez':'Argentina',
+  'Alvarez':'Argentina','Julian Alvarez':'Argentina',
+  'Di Maria':'Argentina',
+  'Ronaldo':'Portugal','Cristiano Ronaldo':'Portugal','CR7':'Portugal',
+  'Bruno Fernandes':'Portugal','Leao':'Portugal','Rafael Leao':'Portugal',
+  'Ramos':'Portugal','Goncalo Ramos':'Portugal',
+  'Joao Felix':'Portugal',
+  'Morata':'Spain','Alvaro Morata':'Spain',
+  'Yamal':'Spain','Lamine Yamal':'Spain',
+  'Nico Williams':'Spain','Ferran Torres':'Spain','Oyarzabal':'Spain',
+  'Havertz':'Germany','Kai Havertz':'Germany',
+  'Musiala':'Germany','Jamal Musiala':'Germany',
+  'Wirtz':'Germany','Florian Wirtz':'Germany',
+  'Muller':'Germany','Thomas Muller':'Germany',
+  'Sane':'Germany','Leroy Sane':'Germany',
+  'Gakpo':'Netherlands','Cody Gakpo':'Netherlands',
+  'Memphis':'Netherlands','Depay':'Netherlands','Memphis Depay':'Netherlands',
+  'Malen':'Netherlands','Donyell Malen':'Netherlands',
+  'Lukaku':'Belgium','Romelu Lukaku':'Belgium',
+  'Openda':'Belgium','Lois Openda':'Belgium',
+  'Darwin':'Uruguay','Darwin Nunez':'Uruguay',
+  'Suarez':'Uruguay','Luis Suarez':'Uruguay',
+  'Luis Diaz':'Colombia','Diaz':'Colombia',
+  'Duran':'Colombia','Jhon Duran':'Colombia',
+  'James':'Colombia','James Rodriguez':'Colombia',
+  'Gimenez':'Mexico','Santiago Gimenez':'Mexico',
+  'Jimenez':'Mexico','Raul Jimenez':'Mexico',
+  'Salah':'Egypt','Mohamed Salah':'Egypt','Mo Salah':'Egypt',
+  'Son':'South Korea','Son Heung-min':'South Korea','Heung-min Son':'South Korea',
+  'Isak':'Sweden','Alexander Isak':'Sweden',
+  'Gyokeres':'Sweden','Viktor Gyokeres':'Sweden',
+  'El Kaabi':'Morocco','Ayoub El Kaabi':'Morocco',
+  'Brahim':'Morocco','Brahim Diaz':'Morocco',
+  'Dzeko':'Bosnia and Herzegovina','Edin Dzeko':'Bosnia and Herzegovina',
+  'Demirovic':'Bosnia and Herzegovina','Ermedin Demirovic':'Bosnia and Herzegovina',
+  'Minamino':'Japan','Takumi Minamino':'Japan',
+  'Mitoma':'Japan','Kaoru Mitoma':'Japan',
+  'Arda Guler':'Türkiye','Guler':'Türkiye',
+  'Yldz':'Türkiye','Yildiz':'Türkiye','Kenan Yldz':'Türkiye',
+  'Mahrez':'Algeria','Riyad Mahrez':'Algeria',
+  'Haller':'Ivory Coast','Sebastien Haller':'Ivory Coast',
+  'Adingra':'Ivory Coast','Simon Adingra':'Ivory Coast',
+  'Enner Valencia':'Ecuador','Valencia':'Ecuador',
+  'Jonathan David':'Canada','Alphonso Davies':'Canada','Davies':'Canada',
+  'Almoez Ali':'Qatar','Akram Afif':'Qatar','Afif':'Qatar',
+  'Pulisic':'United States','Christian Pulisic':'United States',
+  'Balogun':'United States','Folarin Balogun':'United States',
+  'Mane':'Senegal','Sadio Mane':'Senegal',
+  'Jackson':'Senegal','Nicolas Jackson':'Senegal',
+  'Kramaric':'Croatia','Andrej Kramaric':'Croatia',
+  'Modric':'Croatia','Luka Modric':'Croatia',
+  'Inaki Williams':'Ghana',
+  'Jordan Ayew':'Ghana','Nuamah':'Ghana','Ernest Nuamah':'Ghana',
+  'Schick':'Czech Republic','Patrik Schick':'Czech Republic',
+  'Embolo':'Switzerland','Breel Embolo':'Switzerland',
+  'Okafor':'Switzerland','Noah Okafor':'Switzerland',
+  'Ndoye':'Switzerland','Dan Ndoye':'Switzerland',
+  'Taremi':'Iran','Mehdi Taremi':'Iran',
+  'Bakambu':'DR Congo','Shomurodov':'Uzbekistan','Eldor Shomurodov':'Uzbekistan',
+  'McTominay':'Scotland','Scott McTominay':'Scotland',
+  'Arnautovic':'Austria','Marko Arnautovic':'Austria',
+};
+
+const normalizeForLookup = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+const getGBTeam = (pick) => {
+  if (!pick || !pick.trim()) return null;
+  const n = normalizeForLookup(pick);
+  // Direct match (normalised)
+  for (const [k,v] of Object.entries(GB_LOOKUP)) {
+    if (normalizeForLookup(k) === n) return v;
+  }
+  // Substring match
+  for (const [k,v] of Object.entries(GB_LOOKUP)) {
+    const kn = normalizeForLookup(k);
+    if (n.includes(kn) || kn.includes(n)) return v;
+  }
+  return null;
+};
+
+const rankToElo = (rank) => rank ? Math.max(600, 2000 - (rank - 1) * 10) : 900;
+
+const simMatchFn = (homeTeam, awayTeam) => {
+  const eloH = rankToElo(FIFA_RANKINGS[homeTeam]);
+  const eloA = rankToElo(FIFA_RANKINGS[awayTeam]);
+  const pH = 1 / (1 + Math.pow(10, (eloA - eloH) / 400));
+  const poi = (l) => {
+    if (l <= 0) return 0;
+    const L = Math.exp(-Math.min(l, 20));
+    let k = 0, p = 1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k - 1;
+  };
+  return { h: poi(1.3 * pH * 2), a: poi(1.3 * (1-pH) * 2) };
+};
+
+const advanceTeam = (result, bracketEntry, type) => {
+  if (!result || !bracketEntry) return null;
+  const h = parseInt(result.h), a = parseInt(result.a);
+  if (isNaN(h) || isNaN(a)) return null;
+  const homeWins = h > a || (h === a && Math.random() < 0.5);
+  if (type === 'winner') return homeWins ? bracketEntry.home : bracketEntry.away;
+  return homeWins ? bracketEntry.away : bracketEntry.home;
+};
+
+const preprocessForSim = (name, allPredictions) => {
+  const preds = allPredictions[name] || {};
+  const groupPreds = {};
+  GROUP_MATCHES.forEach(m => {
+    const p = (preds.group||{})[m.id];
+    if (p && p.h !== '' && p.h != null) groupPreds[m.id] = p;
+  });
+  const koPreds = {};
+  for (let mId = 73; mId <= 104; mId++) {
+    const p = (preds.ko||{})[mId];
+    if (p && p.h !== '' && p.h != null) koPreds[mId] = p;
+  }
+  // Pre-compute user R32 bracket
+  const uS = computeAllStandings(preds.group || {});
+  const uC = new Set(GROUP_KEYS.filter(g =>
+    GROUP_MATCHES.filter(m => m.group === g).every(m => {
+      const p = (preds.group||{})[m.id]; return p && p.h !== '' && p.h != null;
+    })
+  ));
+  const uAll = uC.size === 12;
+  const uB3 = uAll ? getBest3rdPlaceGroups(uS) : [];
+  const uSG = uAll ? assignThirdPlaceSlots(uB3) : {};
+  const userR32 = {};
+  for (let mId = 73; mId <= 88; mId++) {
+    const slot = R32_SLOTS[mId];
+    let home = null, away = null;
+    if (slot.home.type === '1' && uC.has(slot.home.g)) home = uS[slot.home.g]?.[0]?.team;
+    else if (slot.home.type === '2' && uC.has(slot.home.g)) home = uS[slot.home.g]?.[1]?.team;
+    else if (slot.home.type === '3' && uAll) { const g = uSG[mId]; home = g ? uS[g]?.[2]?.team : null; }
+    if (slot.away.type === '1' && uC.has(slot.away.g)) away = uS[slot.away.g]?.[0]?.team;
+    else if (slot.away.type === '2' && uC.has(slot.away.g)) away = uS[slot.away.g]?.[1]?.team;
+    else if (slot.away.type === '3' && uAll) { const g = uSG[mId]; away = g ? uS[g]?.[2]?.team : null; }
+    userR32[mId] = { home, away };
+  }
+  const { bracket: userBracket } = buildBracket(preds.group || {}, preds.ko || {});
+  const joker = preds.joker || {};
+  const bonus = preds.bonus || {};
+  return { name, preds, groupPreds, koPreds, userR32, userBracket,
+    jokerTeam: joker.team||null, jokerGroup: joker.group||null, bonus, gbTeam: getGBTeam(bonus.goldenBoot) };
+};
+
+const simOneTournament = (fixedGrp, fixedKo, processed) => {
+  // Simulate group stage
+  const gRes = Object.assign({}, fixedGrp);
+  for (let i = 0; i < GROUP_MATCHES.length; i++) {
+    const m = GROUP_MATCHES[i];
+    if (!(m.id in gRes)) gRes[m.id] = simMatchFn(m.home, m.away);
+  }
+  // Build R32 bracket from group results
+  const { bracket: r32B } = buildActualBracket(gRes, {});
+  const koRes = Object.assign({}, fixedKo);
+  const bracket = {};
+  // R32
+  for (let mId = 73; mId <= 88; mId++) {
+    bracket[mId] = { home: r32B[mId]?.home || null, away: r32B[mId]?.away || null };
+    if (!(mId in koRes)) koRes[mId] = simMatchFn(bracket[mId].home || '', bracket[mId].away || '');
+  }
+  // R16 through Final using KO_FEED
+  for (let mId = 89; mId <= 104; mId++) {
+    const feed = KO_FEED[mId];
+    if (!feed) continue;
+    const is3rd = feed.loser === true;
+    const home = advanceTeam(koRes[feed.h], bracket[feed.h], is3rd ? 'loser' : 'winner');
+    const away = advanceTeam(koRes[feed.a], bracket[feed.a], is3rd ? 'loser' : 'winner');
+    bracket[mId] = { home, away };
+    if (!(mId in koRes)) koRes[mId] = simMatchFn(home || '', away || '');
+  }
+  // Outcomes
+  const winner = advanceTeam(koRes[104], bracket[104], 'winner');
+  const runnerUp = advanceTeam(koRes[104], bracket[104], 'loser');
+  const third = advanceTeam(koRes[103], bracket[103], 'winner');
+  // Team goals
+  const goals = {};
+  for (let i = 0; i < GROUP_MATCHES.length; i++) {
+    const m = GROUP_MATCHES[i], r = gRes[m.id];
+    if (r) { goals[m.home] = (goals[m.home]||0)+r.h; goals[m.away] = (goals[m.away]||0)+r.a; }
+  }
+  for (let mId = 73; mId <= 104; mId++) {
+    const r = koRes[mId], b = bracket[mId];
+    if (r && b) {
+      if (b.home) goals[b.home] = (goals[b.home]||0)+r.h;
+      if (b.away) goals[b.away] = (goals[b.away]||0)+r.a;
+    }
+  }
+  let topTeam = null, topG = -1;
+  for (const [t,g] of Object.entries(goals)) { if (g > topG) { topG = g; topTeam = t; } }
+  // Build actualMatchByTeamByRound for bracket scoring
+  const tmr = {}; // round -> { team -> { matchId, side } }
+  tmr.R32 = {};
+  for (let mId = 73; mId <= 88; mId++) {
+    const b = bracket[mId];
+    if (b?.home) tmr.R32[b.home] = { matchId: mId, side: 'home' };
+    if (b?.away) tmr.R32[b.away] = { matchId: mId, side: 'away' };
+  }
+  for (let mId = 89; mId <= 104; mId++) {
+    const rnd = ROUND_FOR(mId);
+    if (!rnd) continue;
+    if (!tmr[rnd]) tmr[rnd] = {};
+    const b = bracket[mId];
+    if (b?.home) tmr[rnd][b.home] = { matchId: mId, side: 'home' };
+    if (b?.away) tmr[rnd][b.away] = { matchId: mId, side: 'away' };
+  }
+  // Score all participants
+  return processed.map(pp => {
+    let total = 0;
+    // Group stage scoring
+    for (let i = 0; i < GROUP_MATCHES.length; i++) {
+      const m = GROUP_MATCHES[i];
+      const pred = pp.groupPreds[m.id]; if (!pred) continue;
+      const actual = gRes[m.id]; if (!actual) continue;
+      const { total: pts } = scoreMatch(pred, actual, m.home, m.away, true);
+      total += pts * getJokerMultiplier(m, pp.jokerTeam, pp.jokerGroup);
+    }
+    // R32 bracket pts
+    const R32v = SCORING.bracketTeam.R32;
+    for (let mId = 73; mId <= 88; mId++) {
+      const ub = pp.userR32[mId]; if (!ub) continue;
+      for (const [team, side] of [[ub.home,'home'],[ub.away,'away']]) {
+        if (!team) continue;
+        const act = tmr.R32?.[team]; if (!act) continue;
+        total += (act.matchId===mId && act.side===side) ? R32v : R32v*SCORING.halfMultiplier;
+      }
+    }
+    // KO match score predictions + R16+ bracket pts
+    for (let mId = 73; mId <= 104; mId++) {
+      const actR = koRes[mId]; if (!actR) continue;
+      const simB = bracket[mId]; if (!simB) continue;
+      // KO match score prediction
+      const koPred = pp.koPreds[mId];
+      const um = pp.userBracket[mId];
+      if (koPred && um?.home && um?.away) {
+        const swap = um.home===simB.away && um.away===simB.home;
+        const eH = swap ? actR.a : actR.h, eA = swap ? actR.h : actR.a;
+        const pH = parseInt(koPred.h), pA = parseInt(koPred.a);
+        const aH = parseInt(eH), aA = parseInt(eA);
+        if (!isNaN(pH)&&!isNaN(pA)&&!isNaN(aH)&&!isNaN(aA)) {
+          if (pH===aH) total+=SCORING.homeGoals;
+          if (pA===aA) total+=SCORING.awayGoals;
+          const pr=pH>pA?'H':pH<pA?'A':'D', ar=aH>aA?'H':aH<aA?'A':'D';
+          if (pr===ar) total+=(ar==='D'?SCORING.correctDraw:SCORING.correctResult);
+          if (pH===aH&&pA===aA) total+=SCORING.exactBonus;
+        }
+      }
+      // R16+ bracket pts
+      if (mId >= 89) {
+        const rnd = ROUND_FOR(mId); if (!rnd||!SCORING.bracketTeam[rnd]) continue;
+        if (!um) continue;
+        const v = SCORING.bracketTeam[rnd];
+        for (const [team, side] of [[um.home,'home'],[um.away,'away']]) {
+          if (!team) continue;
+          const act = tmr[rnd]?.[team]; if (!act) continue;
+          total += (act.matchId===mId && act.side===side) ? v : v*SCORING.halfMultiplier;
+        }
+      }
+    }
+    // Bonus picks
+    if (winner && pp.bonus.winner===winner) total+=SCORING.bonusPick;
+    if (runnerUp && pp.bonus.runnerUp===runnerUp) total+=SCORING.bonusPick;
+    if (third && pp.bonus.thirdPlace===third) total+=SCORING.bonusPick;
+    if (topTeam && pp.gbTeam===topTeam) total+=SCORING.bonusPick;
+    return total;
+  });
+};
+
+const runSimulation = (N, participants, allPredictions, results, onProgress, onComplete) => {
+  const processed = participants.map(p => preprocessForSim(p, allPredictions));
+  const fixedGrp = {};
+  GROUP_MATCHES.forEach(m => { const r=(results.group||{})[m.id]; if(r&&r.h!==''&&r.h!=null) fixedGrp[m.id]=r; });
+  const fixedKo = {};
+  for (let mId=73;mId<=104;mId++) { const r=(results.ko||{})[mId]; if(r&&r.h!==''&&r.h!=null) fixedKo[mId]=r; }
+  const afterResults = Object.keys(fixedGrp).length + Object.keys(fixedKo).length;
+  const n = participants.length;
+  const wins = new Int32Array(n), top3 = new Int32Array(n), sums = new Float64Array(n);
+  let done = 0;
+  const CHUNK = 200;
+  const t0 = Date.now();
+  const tick = () => {
+    const end = Math.min(done+CHUNK, N);
+    for (; done<end; done++) {
+      const scores = simOneTournament(fixedGrp, fixedKo, processed);
+      let max = -Infinity, tieCount = 0;
+      for (let i=0;i<n;i++) { sums[i]+=scores[i]; if(scores[i]>max) max=scores[i]; }
+      for (let i=0;i<n;i++) { if(scores[i]>=max) tieCount++; }
+      for (let i=0;i<n;i++) { if(scores[i]>=max) wins[i]+=1/tieCount; }
+      const order = Array.from({length:n},(_,i)=>i).sort((a,b)=>scores[b]-scores[a]);
+      for (let k=0;k<Math.min(3,n);k++) top3[order[k]]++;
+    }
+    onProgress(done, N);
+    if (done<N) { setTimeout(tick, 0); return; }
+    const elapsed = Date.now()-t0;
+    const currentScores = participants.map(p => {
+      const preds = allPredictions[p]||{};
+      return computeUserScore(preds, results.group||{}, results.ko||{}, results.bracketTeams, results.bonus||{}, preds.joker||{}).total;
+    });
+    const out = participants.map((p,i) => ({
+      name:p, winPct:wins[i]/N*100, top3Pct:top3[i]/N*100,
+      expectedScore:Math.round(sums[i]/N*10)/10, currentScore:currentScores[i],
+    })).sort((a,b)=>b.winPct-a.winPct);
+    onComplete(out, elapsed, afterResults);
+  };
+  setTimeout(tick, 0);
+};
+
+// ── Admin simulator section ────────────────────────────────────────────
+function AdminSimulatorSection({ participants, allPredictions, results }) {
+  const N_SIMS = 20000;
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState(null);
+  const SIM_KEY = NS + '-sim-results';
+
+  const handleRun = () => {
+    setRunning(true); setProgress(0); setStatus('running');
+    runSimulation(N_SIMS, participants, allPredictions, results,
+      (d,n) => setProgress(d/n),
+      async (out, elapsed, afterResults) => {
+        try {
+          await storage.set(SIM_KEY, { runAt: new Date().toISOString(), afterResults, N: N_SIMS, elapsed, results: out }, true);
+          setStatus('done');
+        } catch(e) { setStatus('error'); }
+        setRunning(false);
+      }
+    );
+  };
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div className="micro-caps" style={{ marginBottom: 10 }}>🎲 Tournament Simulator</div>
+      <div className="card" style={{ padding: '16px 20px' }}>
+        <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 14 }}>
+          Runs {N_SIMS.toLocaleString()} simulated tournaments using an Elo model from FIFA rankings.
+          Results are saved to Firestore and visible to all participants. Run after entering new match results.
+        </div>
+        {!running ? (
+          <button onClick={handleRun} style={{
+            background: 'var(--burgundy)', color: 'white', border: 'none',
+            fontSize: 14, fontWeight: 700, padding: '10px 24px', borderRadius: 5,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontSize: 18 }}>🎲</span> Run Simulation
+          </button>
+        ) : (
+          <div style={{ maxWidth: 320 }}>
+            <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 8 }}>
+              Simulating {Math.round(progress*N_SIMS).toLocaleString()} / {N_SIMS.toLocaleString()}…
+            </div>
+            <div style={{ height: 6, background: 'var(--line)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ height: '100%', background: 'var(--burgundy)', borderRadius: 3,
+                width: (progress*100)+'%', transition: 'width 0.2s' }} />
+            </div>
+          </div>
+        )}
+        {status === 'done' && !running && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--forest)', fontWeight: 600 }}>
+            ✓ Saved — participants can now view their win odds
+          </div>
+        )}
+        {status === 'error' && !running && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--burgundy)' }}>
+            ✗ Failed to save — check your connection and try again
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SimTableRow({ r, i, isMe, leader, allPredictions }) {
+  const [expanded, setExpanded] = useState(false);
+  const preds = allPredictions[r.name] || {};
+  const bonus = preds.bonus || {};
+  const joker = preds.joker || {};
+  const gap = leader && r.name !== leader.name ? (r.currentScore - leader.currentScore) : 0;
+  const expGap = leader && r.name !== leader.name ? (r.expectedScore - leader.expectedScore) : 0;
+
+  const bonusRows = [
+    { label: 'Winner', val: bonus.winner },
+    { label: 'Runner-up', val: bonus.runnerUp },
+    { label: '3rd Place', val: bonus.thirdPlace },
+    { label: 'Golden Boot', val: bonus.goldenBoot },
+  ].filter(b => b.val);
+
+  return (
+    <>
+      <tr style={{ borderBottom: expanded ? 'none' : '1px solid var(--line-soft)', background: isMe ? 'rgba(159,27,27,0.03)' : 'transparent', cursor: 'pointer' }}
+        onClick={() => setExpanded(e => !e)}>
+        <td style={{ padding: '8px 14px', fontWeight: 600, color: (['#d6892a','#9b9087','#8b6e4e'][i] || 'var(--ink-soft)') }}>
+          {['🥇','🥈','🥉'][i] || i+1}
+        </td>
+        <td style={{ padding: '8px 14px', fontWeight: isMe ? 700 : 400 }}>
+          {r.name}{isMe && <span style={{ fontSize: 11, color: 'var(--burgundy)', marginLeft: 6 }}>◀ you</span>}
+        </td>
+        <td style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 700 }} className="mono">{r.winPct.toFixed(1)}%</td>
+        <td style={{ padding: '8px 14px', textAlign: 'right', color: 'var(--ink-soft)' }} className="mono">{r.top3Pct.toFixed(1)}%</td>
+        <td style={{ padding: '8px 14px', textAlign: 'right' }} className="mono">{r.expectedScore}</td>
+        <td style={{ padding: '8px 14px', textAlign: 'right', color: 'var(--ink-soft)' }} className="mono">{r.currentScore}</td>
+        <td style={{ padding: '8px 8px', textAlign: 'center', color: 'var(--ink-soft)', fontSize: 11 }}>
+          {expanded ? '▲' : '▼'}
+        </td>
+      </tr>
+      {expanded && (
+        <tr style={{ borderBottom: '1px solid var(--line-soft)', background: isMe ? 'rgba(159,27,27,0.02)' : 'var(--cream-2)' }}>
+          <td colSpan={7} style={{ padding: '10px 14px 14px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+              {/* Score gap */}
+              <div style={{ minWidth: 160 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                  vs Leader
+                </div>
+                {i === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--forest)', fontWeight: 600 }}>Currently leading 🏆</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13 }}>
+                      <span style={{ fontWeight: 700, color: gap >= 0 ? 'var(--forest)' : 'var(--burgundy)' }}>
+                        {gap >= 0 ? '+' : ''}{gap} pts
+                      </span>
+                      <span style={{ color: 'var(--ink-soft)', marginLeft: 6 }}>now</span>
+                    </div>
+                    <div style={{ fontSize: 13 }}>
+                      <span style={{ fontWeight: 700, color: expGap >= 0 ? 'var(--forest)' : 'var(--burgundy)' }}>
+                        {expGap >= 0 ? '+' : ''}{expGap.toFixed(1)} pts
+                      </span>
+                      <span style={{ color: 'var(--ink-soft)', marginLeft: 6 }}>expected</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Bonus picks */}
+              {bonusRows.length > 0 && (
+                <div style={{ minWidth: 180 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                    Bonus picks
+                  </div>
+                  {bonusRows.map(b => (
+                    <div key={b.label} style={{ fontSize: 13, display: 'flex', gap: 6, marginBottom: 2 }}>
+                      <span style={{ color: 'var(--ink-soft)', minWidth: 80 }}>{b.label}</span>
+                      <span style={{ fontWeight: 600 }}>{b.val}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Joker */}
+              {(joker.team || joker.group) && (
+                <div style={{ minWidth: 140 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                    Joker
+                  </div>
+                  {joker.team && <div style={{ fontSize: 13 }}><span style={{ color: 'var(--ink-soft)' }}>Team </span><strong>{joker.team}</strong></div>}
+                  {joker.group && <div style={{ fontSize: 13 }}><span style={{ color: 'var(--ink-soft)' }}>Group </span><strong>{joker.group}</strong></div>}
+                </div>
+              )}
+              {/* Win commentary */}
+              <div style={{ minWidth: 180 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                  Path to victory
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.5 }}>
+                  {r.winPct < 1
+                    ? 'Needs a big swing — several upset results plus bonus picks to land'
+                    : r.winPct < 5
+                      ? 'An outside shot — bonus picks and a fortunate bracket path needed'
+                      : r.winPct < 15
+                        ? 'In contention — bonus picks and a good KO run could do it'
+                        : r.winPct < 30
+                          ? 'Well placed — strong picks across the board'
+                          : 'Favourite — already in a strong position to win'}
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// ── Simulator view for participants ────────────────────────────────────
+function SimulatorView({ participants, allPredictions, results, profiles, currentUser }) {
+  const [simData, setSimData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const SIM_KEY = NS + '-sim-results';
+
+  useEffect(() => {
+    storage.getJSON(SIM_KEY, true).then(data => { setSimData(data); setLoading(false); }).catch(() => setLoading(false));
+  }, [results]);
+
+  const simResults = simData?.results || [];
+  const me = simResults.find(r => r.name === currentUser);
+  const maxWin = simResults[0]?.winPct || 1;
+
+  return (
+    <div>
+      <SectionHeader kicker="Monte Carlo · 20,000 simulations" title="Tournament Simulator"
+        subtitle="Win probability estimates based on an Elo model from FIFA rankings. Updated by admin after each set of results." />
+
+      {loading && (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-soft)', fontSize: 14 }}>Loading…</div>
+      )}
+
+      {!loading && !simData && (
+        <div className="card" style={{ padding: '40px 24px', textAlign: 'center', marginTop: 20 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🎲</div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Simulation not yet run</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-soft)', maxWidth: 340, margin: '0 auto' }}>
+            Check back once results are in — the admin runs the simulation after each set of matches.
+          </div>
+        </div>
+      )}
+
+      {!loading && simData && (
+        <div className="fadein">
+          <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 12, marginBottom: 16 }}>
+            {simData.N?.toLocaleString()} simulations · after {simData.afterResults} match results
+            {simData.runAt ? ' · ' + new Date(simData.runAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : ''}
+            {simData.elapsed ? ' · took ' + (simData.elapsed/1000).toFixed(1) + 's' : ''}
+          </div>
+
+          {me && (
+            <div className="card" style={{ padding: '16px 20px', marginBottom: 16, borderLeft: '3px solid var(--burgundy)' }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-soft)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Your odds</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+                <div>
+                  <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--burgundy)', lineHeight: 1 }}>{me.winPct.toFixed(1)}%</span>
+                  <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>chance to win</div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ fontSize: 13 }}>
+                    <span style={{ color: 'var(--ink-soft)', marginRight: 6 }}>Top 3</span>
+                    <span style={{ fontWeight: 700 }}>{me.top3Pct.toFixed(1)}%</span>
+                  </div>
+                  <div style={{ fontSize: 13 }}>
+                    <span style={{ color: 'var(--ink-soft)', marginRight: 6 }}>Expected</span>
+                    <span style={{ fontWeight: 700 }}>{me.expectedScore} pts</span>
+                  </div>
+                  <div style={{ fontSize: 13 }}>
+                    <span style={{ color: 'var(--ink-soft)', marginRight: 6 }}>Currently</span>
+                    <span style={{ fontWeight: 700 }}>{me.currentScore} pts</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="card" style={{ padding: '18px 20px', marginBottom: 16 }}>
+            <div className="micro-caps" style={{ marginBottom: 14 }}>\uD83C\uDFC6 Win Probability</div>
+            {simResults.slice(0, Math.min(10, simResults.length)).map((r, i) => {
+              const isMe = r.name === currentUser;
+              const col = i===0?'#d6892a':i===1?'#9b9087':i===2?'#8b6e4e':isMe?'var(--burgundy)':'var(--forest)';
+              return (
+                <div key={r.name} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:7 }}>
+                  <span style={{ fontSize:11, color:'var(--ink-soft)', width:22, textAlign:'right', flexShrink:0 }}>
+                    {i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}
+                  </span>
+                  <span style={{ fontSize:13, fontWeight:isMe?700:400, width:130, flexShrink:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                    {r.name}
+                  </span>
+                  <div style={{ flex:1, height:12, background:'var(--cream-2)', borderRadius:2, overflow:'hidden', maxWidth:200 }}>
+                    <div style={{ height:'100%', borderRadius:2, background:col, width:maxWin>0?(r.winPct/maxWin*100)+'%':'0%' }} />
+                  </div>
+                  <span style={{ fontSize:13, fontWeight:700, width:48, textAlign:'right' }} className="mono">
+                    {r.winPct.toFixed(1)}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="card" style={{ overflow:'hidden', marginBottom:8 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ background:'var(--cream-2)', borderBottom:'1px solid var(--line)' }}>
+                  <th style={{ padding:'9px 14px', textAlign:'left', fontWeight:600, width:32 }}>#</th>
+                  <th style={{ padding:'9px 14px', textAlign:'left', fontWeight:600 }}>Participant</th>
+                  <th style={{ padding:'9px 14px', textAlign:'right', fontWeight:600 }}>Win%</th>
+                  <th style={{ padding:'9px 14px', textAlign:'right', fontWeight:600 }}>Top 3%</th>
+                  <th style={{ padding:'9px 14px', textAlign:'right', fontWeight:600 }}>Exp</th>
+                  <th style={{ padding:'9px 14px', textAlign:'right', fontWeight:600 }}>Now</th>
+                  <th style={{ padding:'9px 14px', width:32 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {simResults.map((r,i) => {
+                  const isMe = r.name === currentUser;
+                  return (
+                    <SimTableRow key={r.name} r={r} i={i} isMe={isMe} leader={simResults[0]} allPredictions={allPredictions} />
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize:11, color:'var(--ink-soft)', textAlign:'right', marginBottom:16 }}>
+            Elo model from FIFA rankings · team-based Golden Boot matching
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // BROWSE PICKS
@@ -2135,7 +2805,7 @@ function BrowseView({ participants, allPredictions, results, profiles, currentUs
         subtitle="View predictions by participant or by match." />
 
       <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--line)', marginTop:16, marginBottom:20 }}>
-        {[['participant','\uD83D\uDC64 By Participant'],['match','\u26BD By Match'],['h2h','\u2694\uFE0F Head to Head']].map(([key,label]) => (
+        {[['participant','\uD83D\uDC64 By Participant'],['match','⚽ By Match'],['h2h','⚔️ Head to Head']].map(([key,label]) => (
           <button key={key} onClick={() => { setBrowseTab(key); setSelected(null); }}
             style={{ padding:'8px 18px', fontSize:13, fontWeight:browseTab===key?700:400, background:'none', border:'none', cursor:'pointer',
               color:browseTab===key?'var(--ink)':'var(--ink-soft)',
@@ -2168,10 +2838,10 @@ function BrowseView({ participants, allPredictions, results, profiles, currentUs
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, flexWrap:'wrap', gap:8 }}>
               <div>
                 <div className="display" style={{ fontSize:22, fontWeight:700 }}>{selected}</div>
-                {profiles[selected] && <div style={{ fontSize:12, color:'var(--ink-soft)' }}>{profiles[selected].team && profiles[selected].team+' \u00B7 '}{profiles[selected].country}</div>}
+                {profiles[selected] && <div style={{ fontSize:12, color:'var(--ink-soft)' }}>{profiles[selected].team && profiles[selected].team+' · '}{profiles[selected].country}</div>}
               </div>
               <button className="btn" style={{ fontSize:12, padding:'6px 12px', background:'var(--forest)', color:'white', display:'flex', alignItems:'center', gap:5 }}
-                onClick={() => printPicks(viewPreds, selected, profiles)}>\uD83D\uDDB1\uFE0F Download as PDF</button>
+                onClick={() => printPicks(viewPreds, selected, profiles)}>\uD83D\uDDB1️ Download as PDF</button>
             </div>
             <BrowseGroupStage predictions={viewPreds} results={results} />
             <div style={{ marginTop:20 }}>
@@ -2497,7 +3167,7 @@ function MatchPicksView({ participants, allPredictions, results, selected, setSe
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                       {hasResult && <span style={{ fontSize:13, fontWeight:700, color:'var(--forest)' }}>{actual.h}{'–'}{actual.a}</span>}
-                      <span style={{ fontSize:11, color:'var(--forest)' }}>{isSel?'\u25B2 Hide':'\u25BC All picks'}</span>
+                      <span style={{ fontSize:11, color:'var(--forest)' }}>{isSel?'▲ Hide':'▼ All picks'}</span>
                     </div>
                   </button>
                   {isSel && <MatchDetailPanel mId={mId} isKo={isKo} home={home} away={away}
@@ -2552,7 +3222,7 @@ function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participan
           {participants.length} predictions
         </span>
         <span style={{ fontSize:11, color:'var(--ink-soft)' }}>
-          {hasResult ? (exactCount > 0 ? exactCount+' exact \u2B50' : 'sorted by pts') : 'result pending \u00B7 a\u2013z'}
+          {hasResult ? (exactCount > 0 ? exactCount+' exact ⭐' : 'sorted by pts') : 'result pending · a–z'}
         </span>
       </div>
       <div style={{ padding:'0 16px 10px' }}>
@@ -2561,18 +3231,18 @@ function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participan
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 <span style={{ width:20, fontSize:14, textAlign:'center' }}>
-                  {isExact ? '\u2B50' : hasResult && pts > 0 ? '\u2713' : hasResult ? '\u2715' : ''}
+                  {isExact ? '⭐' : hasResult && pts > 0 ? '✓' : hasResult ? '✕' : ''}
                 </span>
                 <span style={{ fontSize:13, fontWeight:isExact?700:400 }}>{name}</span>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 {!isKo && (
                   <span style={{ fontSize:14, fontWeight:700, color:'var(--forest)', fontVariantNumeric:'tabular-nums', minWidth:40, textAlign:'center' }}>
-                    {hasPred ? pred.h+'\u2013'+pred.a : <span style={{ color:'var(--ink-soft)', fontStyle:'italic', fontSize:12 }}>\u2014</span>}
+                    {hasPred ? pred.h+'–'+pred.a : <span style={{ color:'var(--ink-soft)', fontStyle:'italic', fontSize:12 }}>—</span>}
                   </span>
                 )}
                 {!isKo && !hasPred && (
-                  <span style={{ fontSize:12, color:'var(--ink-soft)', fontStyle:'italic', minWidth:40, textAlign:'center' }}>\u2014</span>
+                  <span style={{ fontSize:12, color:'var(--ink-soft)', fontStyle:'italic', minWidth:40, textAlign:'center' }}>—</span>
                 )}
                 {hasResult && (
                   <span className={'pill '+(pts>0?'pill-success':'')} style={{ fontSize:11, minWidth:32, textAlign:'center' }}>
@@ -2714,12 +3384,14 @@ function LoginScreen({ onLogin, participants, profiles }) {
   const [pin, setPin] = useState('');
   const [country, setCountry] = useState('');
   const [team, setTeam] = useState('');
+  const [location, setLocation] = useState('');
   const [error, setError] = useState('');
   const [step, setStep] = useState('name'); // 'name' | 'pin-new' | 'pin-returning' | 'details'
 
   const needsCountry = COMP.fields.includes('country');
   const needsTeam = COMP.fields.includes('team');
-  const needsDetails = needsCountry || needsTeam;
+  const needsLocation = COMP.fields.includes('location');
+  const needsDetails = needsCountry || needsTeam || needsLocation;
 
   const trimmedName = name.trim();
   const isReturning = trimmedName && participants.includes(trimmedName);
@@ -2729,7 +3401,9 @@ function LoginScreen({ onLogin, participants, profiles }) {
     if (!trimmedName) return;
     setError('');
     if (isReturning) {
-      setStep('pin-returning');
+      // If returning user has no stored PIN, send to pin-new to set a fresh one
+      const hasPin = !!(profiles[trimmedName] && profiles[trimmedName].pin);
+      setStep(hasPin ? 'pin-returning' : 'pin-new');
     } else {
       if (needsDetails) setStep('details');
       else setStep('pin-new');
@@ -2739,6 +3413,7 @@ function LoginScreen({ onLogin, participants, profiles }) {
   const handleDetailsNext = () => {
     if (needsCountry && !country) { setError('Please select your country.'); return; }
     if (needsTeam && !team) { setError('Please select your team.'); return; }
+    if (needsLocation && !location) { setError('Please select your location.'); return; }
     setError('');
     setStep('pin-new');
   };
@@ -2750,7 +3425,12 @@ function LoginScreen({ onLogin, participants, profiles }) {
       if (storedPin && storedPin !== pin) { setError('Incorrect PIN. Please try again.'); setPin(''); return; }
     }
     setError('');
-    onLogin(trimmedName, isReturning ? null : { country, team, pin });
+    // Returning user with no stored PIN: pass profile with new PIN so it gets saved
+    const isPinReset = isReturning && step === 'pin-new' && !(profiles[trimmedName]?.pin);
+    const profileToSave = isPinReset
+      ? { ...(profiles[trimmedName] || {}), pin }
+      : isReturning ? null : { country, team, location, pin };
+    onLogin(trimmedName, profileToSave);
   };
 
   const inputStyle = {
@@ -2784,7 +3464,7 @@ function LoginScreen({ onLogin, participants, profiles }) {
                 value={name}
                 onChange={e => { setName(e.target.value); setError(''); }}
                 onKeyDown={e => e.key === 'Enter' && trimmedName && handleNameNext()}
-                placeholder="e.g. José Mourinho"
+                {...(COMP.namePlaceholder ? { placeholder: COMP.namePlaceholder } : { placeholder: "e.g. José Mourinho" })}
                 autoFocus
                 style={{ ...inputStyle, marginBottom: 4 }}
               />
@@ -2800,7 +3480,7 @@ function LoginScreen({ onLogin, participants, profiles }) {
                   <hr className="h-rule" />
                   <div className="micro-caps" style={{ marginBottom: 8 }}>{participants.length} registered</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {participants.map(p => (
+                    {[...participants].sort((a, b) => a.localeCompare(b)).map(p => (
                       <button key={p} className="pill" style={{ cursor: 'pointer' }}
                         onClick={() => { setName(p); setStep('pin-returning'); setError(''); }}>
                         {p}
@@ -2830,7 +3510,16 @@ function LoginScreen({ onLogin, participants, profiles }) {
                   <label className="micro-caps" style={{ display: 'block', marginBottom: 6 }}>Team</label>
                   <select value={team} onChange={e => { setTeam(e.target.value); setError(''); }} style={{ ...selectStyle, marginBottom: 16 }}>
                     <option value="">Select your team…</option>
-                    {SCB_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
+                    {(COMPETITION_ID === 'gcfo-india' ? GCFO_INDIA_TEAMS : SCB_TEAMS).map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </>
+              )}
+              {needsLocation && (
+                <>
+                  <label className="micro-caps" style={{ display: 'block', marginBottom: 6 }}>Location</label>
+                  <select value={location} onChange={e => { setLocation(e.target.value); setError(''); }} style={{ ...selectStyle, marginBottom: 16 }}>
+                    <option value="">Select your location…</option>
+                    {GCFO_INDIA_LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </>
               )}
@@ -2849,12 +3538,14 @@ function LoginScreen({ onLogin, participants, profiles }) {
                 {step === 'pin-new' ? `Registering as` : `Welcome back,`} <strong>{trimmedName}</strong>
               </div>
               <label className="micro-caps" style={{ display: 'block', margin: '12px 0 6px' }}>
-                {step === 'pin-new' ? 'Set a 4-digit PIN' : 'Enter your PIN'}
+                {step === 'pin-returning' ? 'Enter your PIN' : isReturning ? 'Set a new PIN' : 'Set a 4-digit PIN'}
               </label>
               <p style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '0 0 10px' }}>
-                {step === 'pin-new'
-                  ? 'You\'ll need this to access your picks on any device.'
-                  : 'Enter the PIN you chose when you registered.'}
+                {step === 'pin-returning'
+                  ? 'Enter the PIN you chose when you registered.'
+                  : isReturning
+                    ? 'Your PIN was reset — set a new one to secure your picks.'
+                    : 'You\'ll need this to access your picks on any device.'}
               </p>
               <input
                 type="password"
@@ -2901,7 +3592,7 @@ const printPicks = (predictions, user, profiles) => {
   const { bracket } = buildBracket(grp, ko);
   const allStandings = computeAllStandings(grp);
   const f = (team) => TEAM_FLAGS[team] || '';
-  const s = (team, max) => { if (!team) return 'TBD'; const m = max || 99; return team.length > m ? team.slice(0,m-1)+'\u2026' : team; };
+  const s = (team, max) => { if (!team) return 'TBD'; const m = max || 99; return team.length > m ? team.slice(0,m-1)+'…' : team; };
 
   const css = [
     '* { box-sizing:border-box; margin:0; padding:0; }',
@@ -3036,7 +3727,7 @@ const printPicks = (predictions, user, profiles) => {
 
   const center =
     '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:' + (totalH+19) + 'px;padding:0 8px;gap:12px;">' +
-    '<div><div class="fin-lbl">\u2738 Final</div>' + bmc(104) + '</div>' +
+    '<div><div class="fin-lbl">✸ Final</div>' + bmc(104) + '</div>' +
     '<div><div class="rnd-lbl">3rd Place</div>' + bmc(103) + '</div>' +
     '</div>';
 
@@ -3062,7 +3753,7 @@ const printPicks = (predictions, user, profiles) => {
         const has = r.h !== '' && r.h != null && r.a !== '' && r.a != null;
         return '<tr>' +
           '<td class="mh">' + f(m.home)+' '+s(m.home,16) + '</td>' +
-          '<td class="ms">' + (has ? r.h+' \u2013 '+r.a : '_ \u2013 _') + '</td>' +
+          '<td class="ms">' + (has ? r.h+' – '+r.a : '_ – _') + '</td>' +
           '<td class="ma">' + f(m.away)+' '+s(m.away,16) + '</td>' +
           '</tr>';
       }).join('') +
@@ -3075,23 +3766,23 @@ const printPicks = (predictions, user, profiles) => {
   });
 
   const bonusRows = [
-    ['\uD83C\uDFC6 Winner', bonus.winner ? f(bonus.winner)+' '+bonus.winner : '\u2014'],
-    ['\uD83E\uDD48 Runner-up', bonus.runnerUp ? f(bonus.runnerUp)+' '+bonus.runnerUp : '\u2014'],
-    ['\uD83E\uDD49 3rd Place', bonus.thirdPlace ? f(bonus.thirdPlace)+' '+bonus.thirdPlace : '\u2014'],
-    ['\u26BD Golden Boot', bonus.goldenBoot || '\u2014'],
-    ['\u23F1 Tie-break', bonus.tiebreak || '\u2014'],
+    ['\uD83C\uDFC6 Winner', bonus.winner ? f(bonus.winner)+' '+bonus.winner : '—'],
+    ['\uD83E\uDD48 Runner-up', bonus.runnerUp ? f(bonus.runnerUp)+' '+bonus.runnerUp : '—'],
+    ['\uD83E\uDD49 3rd Place', bonus.thirdPlace ? f(bonus.thirdPlace)+' '+bonus.thirdPlace : '—'],
+    ['⚽ Golden Boot', bonus.goldenBoot || '—'],
+    ['⏱ Tie-break', bonus.tiebreak || '—'],
   ].map(([l,v]) => '<tr><td class="bn-lbl">'+l+'</td><td>'+v+'</td></tr>').join('');
 
   const hdr = (sub) =>
     '<div class="hdr"><div><div class="hdr-title">WC26 <em>Predictions</em></div>' +
     '<div style="font-size:10px;color:#6b635b;margin-top:1px;">' + sub + '</div></div>' +
     '<div class="hdr-meta"><strong>' + user + '</strong><br>' +
-    (profile.team ? profile.team+' \u00B7 ' : '') + (profile.country||'') + '</div></div>';
+    (profile.team ? profile.team+' · ' : '') + (profile.country||'') + '</div></div>';
 
   const jokerLine =
     '<div class="joker-info">' +
-    '\uD83C\uDCCF Joker: <strong>' + (joker.team ? f(joker.team)+' '+joker.team : '\u2014') + '</strong>' +
-    ' &nbsp;&nbsp; Group: <strong>' + (joker.group ? joker.group : '\u2014') + '</strong>' +
+    '\uD83C\uDCCF Joker: <strong>' + (joker.team ? f(joker.team)+' '+joker.team : '—') + '</strong>' +
+    ' &nbsp;&nbsp; Group: <strong>' + (joker.group ? joker.group : '—') + '</strong>' +
     '</div>';
 
   const secRow = (label) =>
@@ -3101,18 +3792,18 @@ const printPicks = (predictions, user, profiles) => {
 
   const html =
     '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-    '<title>WC26 Picks \u2014 ' + user + '</title>' +
+    '<title>WC26 Picks — ' + user + '</title>' +
     '<link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">' +
     '<style>' + css + '</style></head><body>' +
     '<div class="page">' +
-    hdr('Group Stage Picks \u00B7 Printed ' + date) +
+    hdr('Group Stage Picks · Printed ' + date) +
     secRow('Group Stage Predictions') +
     '<div class="gg">' + groupsHtml + '</div>' +
     '<div class="ft"><span>WC26 Predictions Competition</span><span>Page 1 of 2</span></div>' +
     '</div>' +
     '<div class="pb"></div>' +
     '<div class="page">' +
-    hdr('Knockout Stage \u0026 Bonus Picks') +
+    hdr('Knockout Stage & Bonus Picks') +
     '<div class="sec-row"><span class="sec">Knockout Bracket</span></div>' +
     bracketSection +
     '<div style="margin-top:10px;"><div class="sec-row"><span class="sec">Bonus Picks</span></div>' +
@@ -3234,6 +3925,12 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
         <button className={`tab-btn ${view === 'leaderboard' ? 'active' : ''}`} onClick={() => setView('leaderboard')}>
           <BarChart3 size={14} /> Leaderboard
         </button>
+        {locked && (
+          <button className={`tab-btn ${view === 'simulator' ? 'active' : ''}`} onClick={() => setView('simulator')}
+            style={{ color: view === 'simulator' ? 'var(--ink)' : 'var(--burgundy)', borderBottomColor: view === 'simulator' ? 'var(--burgundy)' : 'transparent' }}>
+            🎲 Simulator
+          </button>
+        )}
         <button className={`tab-btn ${view === 'rules' ? 'active' : ''}`} onClick={() => setView('rules')}>
           <BookOpen size={14} /> Rules
         </button>
@@ -3757,8 +4454,8 @@ function MatchCells({ match, pred, actual, onSet, jokerMultiplier = 1 }) {
         gap: 4, paddingRight: 8, minWidth: 0,
         borderLeft: jokerMultiplier > 1 ? `3px solid ${jokerColor}` : '3px solid transparent',
       }}>
-        {match.home === underdog && (
-          <span style={{ fontSize: 9, color: 'var(--burgundy)', fontWeight: 700, flexShrink: 0 }}>
+        {FIFA_RANKINGS[match.home] && (
+          <span style={{ fontSize: 9, color: match.home === underdog ? 'var(--burgundy)' : 'var(--ink-soft)', fontWeight: match.home === underdog ? 700 : 400, flexShrink: 0 }}>
             #{FIFA_RANKINGS[match.home]}
           </span>
         )}
@@ -3804,8 +4501,8 @@ function MatchCells({ match, pred, actual, onSet, jokerMultiplier = 1 }) {
         }}>
           {teamShort(match.away)}
         </span>
-        {match.away === underdog && (
-          <span style={{ fontSize: 9, color: 'var(--burgundy)', fontWeight: 700, flexShrink: 0 }}>
+        {FIFA_RANKINGS[match.away] && (
+          <span style={{ fontSize: 9, color: match.away === underdog ? 'var(--burgundy)' : 'var(--ink-soft)', fontWeight: match.away === underdog ? 700 : 400, flexShrink: 0 }}>
             #{FIFA_RANKINGS[match.away]}
           </span>
         )}
@@ -3984,6 +4681,9 @@ function StandingsTable({ standings }) {
               <td style={{ padding: '6px 4px', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Flag team={s.team} size={14} />
                 <span style={{ fontWeight: i < 2 ? 600 : 400 }}>{teamShort(s.team)}</span>
+                {FIFA_RANKINGS[s.team] && (
+                  <span style={{ fontSize: 9, color: 'var(--ink-soft)', flexShrink: 0 }}>#{FIFA_RANKINGS[s.team]}</span>
+                )}
               </td>
               <td className="mono" style={{ padding: '6px 4px', textAlign: 'center' }}>{s.P}</td>
               <td className="mono" style={{ padding: '6px 4px', textAlign: 'center' }}>{s.W}</td>
@@ -5537,7 +6237,7 @@ function FieldView({ participants, allPredictions, profiles }) {
   );
 }
 
-function LeaderboardView({ participants, allPredictions, results, profiles }) {
+function LeaderboardView({ participants, allPredictions, results, profiles, showStillAlive }) {
   const [breakdown, setBreakdown] = useState('team');
   const [filter, setFilter] = useState('total');
   const [miniLeague, setMiniLeague] = useState('all'); // 'all' | team name | country name
@@ -5699,7 +6399,7 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
             <option key={key} value={key} disabled={!availability[key]}
               style={{ paddingLeft: indent * 16 }}
             >
-              {'\u00a0'.repeat(indent * 3)}{label}{!availability[key] ? ' —' : ''}
+              {' '.repeat(indent * 3)}{label}{!availability[key] ? ' —' : ''}
             </option>
           ))}
         </select>
@@ -5769,6 +6469,9 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
           </div>
         )}
         {scores.map((s, i) => {
+          const leaderScore = scores[0]?.total ?? 0;
+          const isEliminated = showStillAlive && s.maxPossible != null && s.maxPossible < leaderScore && i > 0;
+
           // Movement vs snapshot
           const prevRank = s.snapshotRank; // 0-indexed
           const moved = prevRank >= 0 ? prevRank - i : null; // positive = moved up
@@ -5780,9 +6483,15 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
           };
 
           return (
-          <div key={s.name} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14, background: i === 0 ? 'linear-gradient(90deg, #FFF8E5 0%, var(--paper) 60%)' : 'var(--paper)', borderColor: i === 0 ? 'var(--amber)' : 'var(--line)' }}>
+          <div key={s.name} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14,
+            background: isEliminated ? 'var(--cream-2)' : i === 0 ? 'linear-gradient(90deg, #FFF8E5 0%, var(--paper) 60%)' : 'var(--paper)',
+            borderColor: isEliminated ? 'var(--line)' : i === 0 ? 'var(--amber)' : 'var(--line)',
+            opacity: isEliminated ? 0.75 : 1,
+          }}>
             <div style={{ width: 38, textAlign: 'center', flexShrink: 0 }}>
-              {i === 0 ? (
+              {isEliminated ? (
+                <span style={{ fontSize: 22 }}>💀</span>
+              ) : i === 0 ? (
                 <Crown size={22} style={{ color: 'var(--amber)' }} />
               ) : (
                 <span className="display" style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink-soft)' }}>{i + 1}</span>
@@ -5810,9 +6519,9 @@ function LeaderboardView({ participants, allPredictions, results, profiles }) {
                       total <span className="mono" style={{ fontWeight: 600 }}>{s.total.toFixed(1).replace('.0','')}</span>
                     </div>
                   )}
-                  {activeFilter === 'total' && s.maxPossible != null && (
-                    <div style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 1 }}>
-                      max <span className="mono" style={{ fontWeight: 600 }}>{Math.round(s.maxPossible)}</span>
+                  {activeFilter === 'total' && s.maxPossible != null && (showStillAlive || !isEliminated) && (
+                    <div style={{ fontSize: 10, marginTop: 1, color: isEliminated ? 'var(--burgundy)' : 'var(--ink-soft)', fontWeight: isEliminated ? 700 : 400 }}>
+                      {isEliminated ? '💀 eliminated' : <>max <span className="mono" style={{ fontWeight: 600 }}>{Math.round(s.maxPossible)}</span></>}
                     </div>
                   )}
                 </div>
@@ -6853,7 +7562,86 @@ function AdminGroupSection({ results, onSave }) {
   );
 }
 
-function AdminView({ config, setConfig, results, onSave, participants, allPredictions, setAllPredictions, profiles }) {
+function RebuildParticipantsButton({ setParticipants, profiles, setProfiles }) {
+  const [status, setStatus] = useState(null);
+  const [count, setCount] = useState(null);
+
+  const handleRebuild = async () => {
+    setStatus('running');
+    try {
+      const snap = await db.collection('wc26').get();
+      const names = new Set();
+
+      // From prediction docs: {NS}-pred-{name}
+      snap.docs.forEach(doc => {
+        const id = doc.id;
+        const prefix = NS + '-pred-';
+        if (id.startsWith(prefix)) {
+          const name = id.slice(prefix.length);
+          if (name && name.trim()) names.add(name.trim());
+        }
+      });
+
+      // Read existing profiles — preserve PINs/data where intact
+      let existingProfiles = {};
+      const profilesDoc = snap.docs.find(d => d.id === NS + '-profiles');
+      if (profilesDoc) {
+        try {
+          existingProfiles = JSON.parse(profilesDoc.data().value || '{}');
+          Object.keys(existingProfiles).forEach(n => { if (n.trim()) names.add(n.trim()); });
+        } catch {}
+      }
+
+      if (names.size === 0) { setStatus('empty'); return; }
+
+      // Merge: keep existing profiles intact, add blank placeholder for missing users
+      // Blank profile = no PIN stored, user will be prompted to set one on next login
+      const mergedProfiles = { ...existingProfiles };
+      let added = 0;
+      names.forEach(name => { if (!mergedProfiles[name]) { mergedProfiles[name] = {}; added++; } });
+
+      const list = [...names].sort((a, b) => a.localeCompare(b));
+      await storage.set(NS + '-participants', list, true);
+      await storage.set(NS + '-profiles', mergedProfiles, true);
+      setParticipants(list);
+      setProfiles(mergedProfiles);
+      setCount({ total: list.length, added });
+      setStatus('done');
+    } catch (e) {
+      console.error(e);
+      setStatus('error');
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={handleRebuild} disabled={status === 'running'}
+        className="btn" style={{ background: 'var(--forest)', fontSize: 13, padding: '8px 18px', marginBottom: 10 }}>
+        {status === 'running' ? 'Rebuilding…' : '🔧 Rebuild Participant List'}
+      </button>
+      {status === 'done' && (
+        <div style={{ fontSize: 12, color: 'var(--forest)', fontWeight: 600 }}>
+          ✓ {count.total} participant{count.total !== 1 ? 's' : ''} restored
+          {count.added > 0
+            ? ` · ${count.added} missing profile${count.added !== 1 ? 's' : ''} added without PIN — affected users will be prompted to set a new one on login`
+            : ' · all profiles intact, PINs preserved'}
+        </div>
+      )}
+      {status === 'empty' && (
+        <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+          No prediction or profile data found under this competition namespace.
+        </div>
+      )}
+      {status === 'error' && (
+        <div style={{ fontSize: 12, color: 'var(--burgundy)' }}>
+          ✗ Failed — check your connection and try again.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminView({ config, setConfig, results, onSave, participants, allPredictions, setAllPredictions, profiles, setParticipants, setProfiles }) {
   const [authed, setAuthed] = useState(false);
   const [pwInput, setPwInput] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -7095,8 +7883,14 @@ function AdminView({ config, setConfig, results, onSave, participants, allPredic
       {section === 'settings' && (
         <div className="card" style={{ padding: 22, marginTop: 20, maxWidth: 480 }}>
 
-          {/* Lock toggle */}
-          <h3 className="display" style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px' }}>Reset data</h3>
+          {/* Participant recovery */}
+          <h3 className="display" style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px' }}>Rebuild participant list</h3>
+          <p style={{ fontSize: 13, color: 'var(--ink-soft)', margin: '0 0 12px' }}>
+            If participants have disappeared from the list, use this to rebuild it from all existing prediction and profile data in Firestore. Safe to run at any time — it only ever adds names back, never removes them.
+          </p>
+          <RebuildParticipantsButton setParticipants={setParticipants} profiles={profiles} setProfiles={setProfiles} />
+
+          <hr className="h-rule" />
           <p style={{ fontSize: 13, color: 'var(--ink-soft)', margin: '0 0 12px' }}>
             Use these to clear stale test data. <strong>Cannot be undone.</strong>
           </p>
@@ -7129,6 +7923,38 @@ function AdminView({ config, setConfig, results, onSave, participants, allPredic
               onClick={() => setConfig({ ...config, locked: !config.locked })}
             >
               {config.locked ? '🔓 Unlock' : '🔒 Lock'}
+            </button>
+          </div>
+
+          <hr className="h-rule" />
+
+          {/* Still Alive toggle */}
+          <h3 className="display" style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px' }}>💀 Still Alive tracker</h3>
+          <p style={{ fontSize: 13, color: 'var(--ink-soft)', margin: '0 0 12px' }}>
+            Shows each participant's maximum possible remaining score on the leaderboard. Anyone whose ceiling falls below the current leader's score gets a 💀.
+            Designed for the Last 16 onwards — turn it on when you want the endgame tension to kick in.
+          </p>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px 16px', borderRadius: 6,
+            background: config.showStillAlive ? 'rgba(159,27,27,0.07)' : 'rgba(107,99,91,0.06)',
+            border: `1px solid ${config.showStillAlive ? 'var(--burgundy)' : 'var(--line)'}`,
+            marginBottom: 20,
+          }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: config.showStillAlive ? 'var(--burgundy)' : 'var(--ink-soft)' }}>
+                {config.showStillAlive ? '💀 Still Alive tracker — ON' : '💀 Still Alive tracker — OFF'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>
+                {config.showStillAlive ? 'Participants can see who is mathematically eliminated' : 'Turn on during the knockout stages'}
+              </div>
+            </div>
+            <button
+              className="btn"
+              style={{ background: config.showStillAlive ? 'var(--ink-soft)' : 'var(--burgundy)', minWidth: 90 }}
+              onClick={() => setConfig({ ...config, showStillAlive: !config.showStillAlive })}
+            >
+              {config.showStillAlive ? 'Turn Off' : 'Turn On'}
             </button>
           </div>
 
@@ -7172,6 +7998,12 @@ function AdminView({ config, setConfig, results, onSave, participants, allPredic
           </div>
         </div>
       )}
+
+      <AdminSimulatorSection
+        participants={participants}
+        allPredictions={allPredictions}
+        results={results}
+      />
     </div>
   );
 }
