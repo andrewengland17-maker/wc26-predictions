@@ -1977,12 +1977,12 @@ function App() {
         const userPreds = (await storage.getJSON(PRED_PREFIX + user, true)) || { group: {}, ko: {} };
         setPredictions(userPreds);
       }
-      // Load all predictions for leaderboard
+      // Load all predictions in parallel — much faster than sequential for large competitions
+      const predResults = await Promise.all(
+        partList.map(async p => ({ p, data: await storage.getJSON(PRED_PREFIX + p, true) }))
+      );
       const all = {};
-      for (const p of partList) {
-        const up = await storage.getJSON(PRED_PREFIX + p, true);
-        if (up) all[p] = up;
-      }
+      predResults.forEach(({ p, data }) => { if (data) all[p] = data; });
       setAllPredictions(all);
       setLoading(false);
     })();
@@ -2058,7 +2058,7 @@ function App() {
   }
 
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} participants={participants} profiles={profiles} />;
+    return <LoginScreen onLogin={handleLogin} participants={participants} profiles={profiles} allPredictions={allPredictions} />;
   }
 
   const locked = !!config.locked;
@@ -3379,7 +3379,26 @@ function BrowseBonus({ predictions }) {
 // LOGIN
 // ──────────────────────────────────────────────────────────────────────
 
-function LoginScreen({ onLogin, participants, profiles }) {
+function LoginScreen({ onLogin, participants, profiles, allPredictions }) {
+
+  const getPickStatus = (name) => {
+    const preds = allPredictions[name];
+    if (!preds) return 'none';
+    const groupDone = GROUP_MATCHES.every(m => {
+      const r = (preds.group||{})[m.id];
+      return r && r.h !== '' && r.h != null && r.a !== '' && r.a != null;
+    });
+    const joker = preds.joker || {};
+    const jokerDone = !!(joker.team && joker.group);
+    const koDone = range(73, 104).every(mId => {
+      const r = (preds.ko||{})[mId];
+      return r && r.h !== '' && r.h != null && r.a !== '' && r.a != null;
+    });
+    const bonus = preds.bonus || {};
+    const bonusDone = !!(bonus.winner && bonus.runnerUp && bonus.thirdPlace && bonus.goldenBoot && bonus.tiebreak);
+    if (groupDone && jokerDone && koDone && bonusDone) return 'complete';
+    return 'incomplete';
+  };
   const [name, setName] = useState('');
   const [pin, setPin] = useState('');
   const [country, setCountry] = useState('');
@@ -3507,12 +3526,23 @@ function LoginScreen({ onLogin, participants, profiles }) {
                   <hr className="h-rule" />
                   <div className="micro-caps" style={{ marginBottom: 8 }}>{participants.length} registered</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {[...participants].sort((a, b) => a.localeCompare(b)).map(p => (
-                      <button key={p} className="pill" style={{ cursor: 'pointer' }}
-                        onClick={() => { setName(p); setStep('pin-returning'); setError(''); }}>
-                        {p}
-                      </button>
-                    ))}
+                    {[...participants].sort((a, b) => a.localeCompare(b)).map(p => {
+                      const status = getPickStatus(p);
+                      const bg = status === 'complete' ? 'rgba(27,94,63,0.12)' : status === 'incomplete' ? 'rgba(159,27,27,0.10)' : 'var(--cream-2)';
+                      const border = status === 'complete' ? 'var(--forest)' : status === 'incomplete' ? 'var(--burgundy)' : 'var(--line)';
+                      const col = status === 'complete' ? 'var(--forest)' : status === 'incomplete' ? 'var(--burgundy)' : 'var(--ink)';
+                      return (
+                        <button key={p} className="pill"
+                          style={{ cursor: 'pointer', background: bg, borderColor: border, color: col, fontWeight: status !== 'none' ? 600 : 400 }}
+                          onClick={() => { setName(p); setStep('pin-returning'); setError(''); }}>
+                          {p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 10, fontSize: 11, color: 'var(--ink-soft)' }}>
+                    <span style={{ color: 'var(--forest)', fontWeight: 600 }}>■ All picks done</span>
+                    <span style={{ color: 'var(--burgundy)', fontWeight: 600 }}>■ Picks outstanding</span>
                   </div>
                 </>
               )}
