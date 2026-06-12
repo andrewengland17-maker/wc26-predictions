@@ -2058,10 +2058,11 @@ function App() {
   }
 
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} participants={participants} profiles={profiles} allPredictions={allPredictions} />;
+    return <LoginScreen onLogin={handleLogin} onGuest={() => { setCurrentUser('__guest__'); setView('leaderboard'); }} participants={participants} profiles={profiles} allPredictions={allPredictions} locked={!!config.locked} />;
   }
 
   const locked = !!config.locked;
+  const isGuest = currentUser === '__guest__';
 
   return (
     <div className="wc-app">
@@ -2076,6 +2077,7 @@ function App() {
         locked={locked}
         predictions={predictions}
         profiles={profiles}
+        isGuest={isGuest}
       />
       {locked && view !== 'admin' && (
         <div style={{ background: 'var(--burgundy)', color: 'white', textAlign: 'center', padding: '8px 16px', fontSize: 13, fontWeight: 600, letterSpacing: '0.04em' }}>
@@ -2109,7 +2111,7 @@ function App() {
         )}
         {view === 'leaderboard' && (
           <LeaderboardView
-            participants={participants.includes(currentUser) ? participants : [...participants, currentUser]}
+            participants={isGuest ? participants : participants.includes(currentUser) ? participants : [...participants, currentUser]}
             allPredictions={{ ...allPredictions, ...(currentUser ? { [currentUser]: predictions } : {}) }}
             results={results}
             profiles={profiles}
@@ -3395,7 +3397,7 @@ function BrowseBonus({ predictions }) {
 // LOGIN
 // ──────────────────────────────────────────────────────────────────────
 
-function LoginScreen({ onLogin, participants, profiles, allPredictions }) {
+function LoginScreen({ onLogin, onGuest, participants, profiles, allPredictions, locked }) {
 
   const getPickStatus = (name) => {
     const preds = allPredictions[name];
@@ -3521,25 +3523,45 @@ function LoginScreen({ onLogin, participants, profiles, allPredictions }) {
           {/* Step 1: Name */}
           {step === 'name' && (
             <>
-              <label className="micro-caps" style={{ display: 'block', marginBottom: 6 }}>Your name</label>
-              <input
-                value={name}
-                onChange={e => { setName(e.target.value); setError(''); }}
-                onKeyDown={e => e.key === 'Enter' && trimmedName && handleNameNext()}
-                {...(COMP.namePlaceholder ? { placeholder: COMP.namePlaceholder } : { placeholder: "e.g. José Mourinho" })}
-                autoFocus
-                style={{ ...inputStyle, marginBottom: 4 }}
-              />
-              {isReturning && <div style={{ fontSize: 12, color: 'var(--forest)', marginBottom: 12, fontWeight: 600 }}>✓ Welcome back!</div>}
-              {!isReturning && trimmedName && <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 12 }}>New participant — we'll set you up!</div>}
-              {!trimmedName && <div style={{ marginBottom: 16 }} />}
-              {error && <div style={{ fontSize: 13, color: 'var(--burgundy)', marginBottom: 12, display: 'flex', gap: 6 }}><AlertCircle size={14} />{error}</div>}
-              <button className="btn" style={{ width: '100%' }} onClick={handleNameNext} disabled={!trimmedName}>
-                Continue →
-              </button>
+              {!locked && (
+                <>
+                  <label className="micro-caps" style={{ display: 'block', marginBottom: 6 }}>Your name</label>
+                  <input
+                    value={name}
+                    onChange={e => { setName(e.target.value); setError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && trimmedName && handleNameNext()}
+                    {...(COMP.namePlaceholder ? { placeholder: COMP.namePlaceholder } : { placeholder: "e.g. José Mourinho" })}
+                    autoFocus
+                    style={{ ...inputStyle, marginBottom: 4 }}
+                  />
+                  {isReturning && <div style={{ fontSize: 12, color: 'var(--forest)', marginBottom: 12, fontWeight: 600 }}>✓ Welcome back!</div>}
+                  {!isReturning && trimmedName && <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 12 }}>New participant — we'll set you up!</div>}
+                  {!trimmedName && <div style={{ marginBottom: 16 }} />}
+                  {error && <div style={{ fontSize: 13, color: 'var(--burgundy)', marginBottom: 12, display: 'flex', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+                  <button className="btn" style={{ width: '100%' }} onClick={handleNameNext} disabled={!trimmedName}>
+                    Continue →
+                  </button>
+                  <hr className="h-rule" />
+                </>
+              )}
+              {locked && (
+                <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 16, padding: '10px 14px', background: 'var(--cream-2)', borderRadius: 6, borderLeft: '3px solid var(--burgundy)' }}>
+                  🔒 The competition is locked — tap your name below to log in.
+                </div>
+              )}
+              {locked && onGuest && (
+                <>
+                  <button className="btn-ghost btn" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, marginBottom: 4 }}
+                    onClick={onGuest}>
+                    👀 View as Guest
+                  </button>
+                  <div style={{ fontSize: 11, color: 'var(--ink-soft)', textAlign: 'center', marginBottom: 16 }}>
+                    See the leaderboard and results without entering picks
+                  </div>
+                </>
+              )}
               {participants.length > 0 && (
                 <>
-                  <hr className="h-rule" />
                   <div className="micro-caps" style={{ marginBottom: 8 }}>{participants.length} registered</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {[...participants].sort((a, b) => a.localeCompare(b)).map(p => {
@@ -3564,7 +3586,6 @@ function LoginScreen({ onLogin, participants, profiles, allPredictions }) {
               )}
             </>
           )}
-
           {/* Step 2a: Details (country/team) for new SCB users */}
           {step === 'details' && (
             <>
@@ -3926,7 +3947,7 @@ const printPicks = (predictions, user, profiles) => {
 
 
 
-function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked, predictions, profiles }) {
+function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked, predictions, profiles, isGuest }) {
   // Compute completion status for each tab
   const completion = useMemo(() => {
     const p = predictions || {};
@@ -3972,48 +3993,52 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
-          {saveStatus === 'saving' && <span className="pill"><RefreshCw size={11} /> Saving</span>}
-          {saveStatus === 'saved' && <span className="pill pill-success"><Check size={11} /> Saved</span>}
+          {!isGuest && saveStatus === 'saving' && <span className="pill"><RefreshCw size={11} /> Saving</span>}
+          {!isGuest && saveStatus === 'saved' && <span className="pill pill-success"><Check size={11} /> Saved</span>}
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{user}</div>
-            {userProfile && (
+            <div style={{ fontWeight: 600, color: isGuest ? 'var(--ink-soft)' : 'var(--ink)' }}>
+              {isGuest ? '👀 Guest' : user}
+            </div>
+            {!isGuest && userProfile && (
               <div style={{ fontSize: 11, color: 'var(--ink-soft)' }}>{userProfile.team} · {userProfile.country}</div>
             )}
           </div>
-          <button
-            className="btn"
-            style={{ fontSize: 12, padding: '6px 12px', background: 'var(--forest)', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-            onClick={() => printPicks(predictions, user, profiles)}
-            title="Download your picks as a PDF">
-            🖨️ Download as PDF
-          </button>
-          <button className="btn-ghost" style={{ background: 'none', border: 'none', padding: 6, color: 'var(--ink-soft)' }} onClick={onLogout} title="Sign out">
+          {!isGuest && (
+            <button
+              className="btn"
+              style={{ fontSize: 12, padding: '6px 12px', background: 'var(--forest)', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+              onClick={() => printPicks(predictions, user, profiles)}
+              title="Download your picks as a PDF">
+              🖨️ Download as PDF
+            </button>
+          )}
+          <button className="btn-ghost" style={{ background: 'none', border: 'none', padding: 6, color: 'var(--ink-soft)' }} onClick={onLogout} title={isGuest ? 'Exit guest mode' : 'Sign out'}>
             <LogOut size={16} />
           </button>
         </div>
       </div>
       <nav className="scrollbar" style={{ maxWidth: 1100, margin: '0 auto', padding: '0 8px', display: 'flex', gap: 0, overflowX: 'auto' }}>
-        <button
+        {!isGuest && <button
           className={`tab-btn ${view === 'predictions' ? 'active' : ''}`}
           onClick={() => setView('predictions')}
           style={completion.groupDone && view !== 'predictions' ? doneStyle : {}}
         >
           <Calendar size={14} /> Group Stage{completion.groupDone && doneIndicator}
-        </button>
-        <button
+        </button>}
+        {!isGuest && <button
           className={`tab-btn ${view === 'bracket' ? 'active' : ''}`}
           onClick={() => setView('bracket')}
           style={completion.koDone && view !== 'bracket' ? doneStyle : {}}
         >
           <Trophy size={14} /> Knockout{completion.koDone && doneIndicator}
-        </button>
-        <button
+        </button>}
+        {!isGuest && <button
           className={`tab-btn ${view === 'bonus' ? 'active' : ''}`}
           onClick={() => setView('bonus')}
           style={completion.bonusDone && view !== 'bonus' ? doneStyle : {}}
         >
           <Star size={14} /> Bonus Picks{completion.bonusDone && doneIndicator}
-        </button>
+        </button>}
         {locked && (
           <button className={`tab-btn ${view === 'field' ? 'active' : ''}`} onClick={() => setView('field')}
             style={{ color: view === 'field' ? 'var(--ink)' : 'var(--forest)', borderBottomColor: view === 'field' ? 'var(--forest)' : 'transparent' }}
@@ -4040,9 +4065,9 @@ function Header({ user, userProfile, onLogout, view, setView, saveStatus, locked
         <button className={`tab-btn ${view === 'rules' ? 'active' : ''}`} onClick={() => setView('rules')}>
           <BookOpen size={14} /> Rules
         </button>
-        <button className={`tab-btn ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>
+        {!isGuest && <button className={`tab-btn ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>
           <Settings size={14} /> Admin
-        </button>
+        </button>}
       </nav>
     </header>
   );
