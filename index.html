@@ -2892,15 +2892,19 @@ function HeadToHeadView({ participants, allPredictions, results, profiles }) {
     const predB = isKo ? (predsB?.ko||{})[mId] : (predsB?.group||{})[mId];
     const actual = isKo ? (results.ko||{})[mId] : (results.group||{})[mId];
     const hasResult = actual && actual.h !== '' && actual.h != null;
-    const isAgree = agree(predA, predB);
+    const isAgree = !isKo && agree(predA, predB);
     const exA = exact(predA, actual);
     const exB = exact(predB, actual);
     const hasA = predA && predA.h !== '' && predA.h != null;
     const hasB = predB && predB.h !== '' && predB.h != null;
 
-    // KO: get predicted teams from each bracket
-    const bmA = isKo ? bracketA[mId] : null;
-    const bmB = isKo ? bracketB[mId] : null;
+    // KO: get predicted teams from each bracket, fall back to actual bracket
+    const bmA = isKo ? (bracketA[mId] || actualBracket[mId]) : null;
+    const bmB = isKo ? (bracketB[mId] || actualBracket[mId]) : null;
+
+    // Points scored per player for completed matches
+    const ptsA = hasResult && hasA ? scoreMatch(predA, actual, home, away, !isKo).total : null;
+    const ptsB = hasResult && hasB ? scoreMatch(predB, actual, home, away, !isKo).total : null;
 
     return (
       <div key={mId} style={{
@@ -2919,15 +2923,24 @@ function HeadToHeadView({ participants, allPredictions, results, profiles }) {
               {isKo && bmA?.away && <> <Flag team={bmA.away} size={12}/> {teamShort(bmA.away)}</>}
             </span>
           ) : <span style={{ color:'var(--ink-soft)', fontSize:12, fontStyle:'italic' }}>—</span>}
+          {hasResult && ptsA !== null && (
+            <div style={{ fontSize:10, color: ptsA > 0 ? 'var(--forest)' : 'var(--ink-soft)', fontWeight:600, marginTop:1 }}>
+              {ptsA > 0 ? `+${ptsA} pts` : '0 pts'}
+            </div>
+          )}
         </div>
 
         {/* Match info centre */}
         <div style={{ textAlign:'center', minWidth:140 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:11, color:'var(--ink-soft)' }}>
-            <Flag team={home} size={11}/><span>{teamShort(home)}</span>
-            <span style={{ margin:'0 2px' }}>vs</span>
-            <Flag team={away} size={11}/><span>{teamShort(away)}</span>
-          </div>
+          {isKo && !hasResult ? (
+            <div style={{ fontSize:11, color:'var(--ink-soft)', fontWeight:600 }}>M{mId}</div>
+          ) : (
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:11, color:'var(--ink-soft)' }}>
+              <Flag team={home} size={11}/><span>{teamShort(home)}</span>
+              <span style={{ margin:'0 2px' }}>vs</span>
+              <Flag team={away} size={11}/><span>{teamShort(away)}</span>
+            </div>
+          )}
           {hasResult && (
             <div style={{ fontSize:12, fontWeight:700, color:'var(--burgundy)', marginTop:2 }}>
               {actual.h}{'–'}{actual.a}
@@ -2946,6 +2959,11 @@ function HeadToHeadView({ participants, allPredictions, results, profiles }) {
               {exB && ' ⭐'}
             </span>
           ) : <span style={{ color:'var(--ink-soft)', fontSize:12, fontStyle:'italic' }}>—</span>}
+          {hasResult && ptsB !== null && (
+            <div style={{ fontSize:10, color: ptsB > 0 ? 'var(--forest)' : 'var(--ink-soft)', fontWeight:600, marginTop:1 }}>
+              {ptsB > 0 ? `+${ptsB} pts` : '0 pts'}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -3063,12 +3081,10 @@ function HeadToHeadView({ participants, allPredictions, results, profiles }) {
               return ab?.home || ab?.away || (predsA && bracketA[mId]?.home) || (predsB && bracketB[mId]?.home);
             });
             if (!validIds.length) return null;
-            const agreements = validIds.filter(mId => agree((predsA?.ko||{})[mId], (predsB?.ko||{})[mId])).length;
-            return (
+            const agreements = validIds.filter(mId => agree((predsA?.ko||{})[mId], (predsB?.ko||{})[mId])).length;            return (
               <div key={label} className="card" style={{ overflow:'hidden', marginBottom:8 }}>
                 <div style={{ padding:'10px 12px', background:'var(--cream-2)', borderBottom:'1px solid var(--line)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontWeight:700, fontSize:13 }}>{label}</span>
-                  <span style={{ fontSize:11, color:'var(--forest)' }}>{agreements}/{validIds.length} agree</span>
                 </div>
                 {validIds.map(mId => {
                   const ab = actualBracket[mId];
