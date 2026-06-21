@@ -1847,7 +1847,7 @@ const SCB_COUNTRIES = [
   'Jordan','Kenya','Korea','Malaysia','Mauritius',
   'Nepal','Nigeria','Pakistan','Philippines','Poland',
   'Qatar','Saudi Arabia','Singapore','South Africa','Taiwan',
-  'Tanzania','Thailand','UAE','Uganda','UK','USA','Vietnam','Zambia','Zimbabwe','Other',
+  'Tanzania','Thailand','UAE','UK','USA','Vietnam','Zambia','Zimbabwe','Other',
 ];
 
 const COUNTRY_REGION = {
@@ -2141,6 +2141,7 @@ function App() {
             participants={participants}
             allPredictions={allPredictions}
             profiles={profiles}
+            eliminatedTeams={config.eliminatedTeams || []}
           />
         )}
         {view === 'rules' && <RulesView />}
@@ -6129,8 +6130,7 @@ const JOKER_SECTIONS = [
   { key: 'group', label: 'Joker Group', icon: '🃏' },
 ];
 
-function DistributionChart({ entries, isTeam, total }) {
-  // entries: [{ label, count }] sorted desc
+function DistributionChart({ entries, isTeam, total, eliminatedTeams = [] }) {
   if (!entries.length) return (
     <div style={{ color: 'var(--ink-soft)', fontSize: 13, fontStyle: 'italic', padding: '8px 0' }}>No picks yet.</div>
   );
@@ -6140,29 +6140,25 @@ function DistributionChart({ entries, isTeam, total }) {
       {entries.map(({ label, count }, i) => {
         const pct = total > 0 ? Math.round((count / total) * 100) : 0;
         const barPct = max > 0 ? (count / max) * 100 : 0;
+        const isElim = isTeam && eliminatedTeams.includes(label);
         return (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Rank */}
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: isElim ? 0.45 : 1 }}>
             <div style={{ width: 18, textAlign: 'right', fontSize: 11, color: 'var(--ink-soft)', flexShrink: 0 }}>
               {i + 1}
             </div>
-            {/* Flag / initial */}
             <div style={{ width: 22, textAlign: 'center', flexShrink: 0 }}>
               {isTeam ? (TEAM_FLAGS[label] || '⚽') : '👤'}
             </div>
-            {/* Name */}
-            <div style={{ width: 110, fontSize: 13, fontWeight: i === 0 ? 700 : 500, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ width: 110, fontSize: 13, fontWeight: i === 0 ? 700 : 500, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: isElim ? 'line-through' : 'none', color: isElim ? 'var(--ink-soft)' : 'inherit' }}>
               {isTeam ? teamShort(label) : label}
             </div>
-            {/* Bar */}
             <div style={{ flex: 1, height: 18, background: 'var(--cream-2)', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
               <div style={{
                 width: `${barPct}%`, height: '100%', borderRadius: 3,
-                background: i === 0 ? 'var(--burgundy)' : i === 1 ? 'var(--amber)' : 'var(--line)',
+                background: isElim ? 'var(--line)' : i === 0 ? 'var(--burgundy)' : i === 1 ? 'var(--amber)' : 'var(--line)',
                 transition: 'width 0.4s ease',
               }} />
             </div>
-            {/* Count + % */}
             <div style={{ minWidth: 52, textAlign: 'right', fontSize: 12, flexShrink: 0 }}>
               <span className="mono" style={{ fontWeight: 700 }}>{count}</span>
               <span style={{ color: 'var(--ink-soft)', marginLeft: 4 }}>{pct}%</span>
@@ -6212,7 +6208,7 @@ function TiebreakDotPlot({ participants, allPredictions, total }) {
   );
 }
 
-function FieldView({ participants, allPredictions, profiles }) {
+function FieldView({ participants, allPredictions, profiles, eliminatedTeams = [] }) {
   const total = participants.length;
 
   // Tally bonus picks
@@ -6321,7 +6317,7 @@ function FieldView({ participants, allPredictions, profiles }) {
                   </div>
                 )}
               </div>
-              <DistributionChart entries={entries} isTeam={isTeam} total={picked} />
+              <DistributionChart entries={entries} isTeam={isTeam} total={picked} eliminatedTeams={eliminatedTeams} />
             </div>
           );
         })}
@@ -8088,6 +8084,46 @@ function AdminView({ config, setConfig, results, onSave, participants, allPredic
               {config.showStillAlive ? 'Turn Off' : 'Turn On'}
             </button>
           </div>
+
+          <hr className="h-rule" />
+
+          {/* Eliminated Teams */}
+          <h3 className="display" style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px' }}>🚫 Eliminated Teams</h3>
+          <p style={{ fontSize: 13, color: 'var(--ink-soft)', margin: '0 0 14px' }}>
+            Mark teams as eliminated. They will appear with strikethrough in The Field tab.
+          </p>
+          {Object.entries(GROUPS).map(([grp, teams]) => (
+            <div key={grp} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                Group {grp}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {teams.map(team => {
+                  const isElim = (config.eliminatedTeams || []).includes(team);
+                  return (
+                    <button key={team} className="pill"
+                      style={{ cursor: 'pointer', background: isElim ? 'rgba(159,27,27,0.10)' : 'var(--cream-2)', borderColor: isElim ? 'var(--burgundy)' : 'var(--line)', color: isElim ? 'var(--burgundy)' : 'var(--ink)', fontWeight: isElim ? 700 : 400, textDecoration: isElim ? 'line-through' : 'none', opacity: isElim ? 0.7 : 1 }}
+                      onClick={() => {
+                        const current = config.eliminatedTeams || [];
+                        const next = isElim ? current.filter(t => t !== team) : [...current, team];
+                        setConfig({ ...config, eliminatedTeams: next });
+                      }}>
+                      {TEAM_FLAGS[team] || ''} {teamShort(team)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {(config.eliminatedTeams || []).length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 8 }}>
+              {(config.eliminatedTeams || []).length} team{(config.eliminatedTeams || []).length !== 1 ? 's' : ''} eliminated
+              <button onClick={() => setConfig({ ...config, eliminatedTeams: [] })}
+                style={{ marginLeft: 12, fontSize: 11, color: 'var(--burgundy)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                Clear all
+              </button>
+            </div>
+          )}
 
           <hr className="h-rule" />
           <h3 className="display" style={{ fontSize: 18, fontWeight: 700, margin: '0 0 12px' }}>Change admin password</h3>
