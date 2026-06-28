@@ -2142,6 +2142,7 @@ function App() {
             allPredictions={allPredictions}
             profiles={profiles}
             eliminatedTeams={config.eliminatedTeams || []}
+            results={results}
           />
         )}
         {view === 'primer' && COMPETITION_ID === 'scb-treasury' && <MeetTheTeamsView />}
@@ -6230,7 +6231,136 @@ function TiebreakDotPlot({ participants, allPredictions, total }) {
   );
 }
 
-function FieldView({ participants, allPredictions, profiles, eliminatedTeams = [] }) {
+// ── Bracket Accuracy (sub-tab of The Field) ────────────────────────────
+const KO_ROUNDS = [
+  { key: 'r32',   label: 'Round of 32',    matchIds: range(73, 88)   },
+  { key: 'r16',   label: 'Round of 16',    matchIds: range(89, 96)   },
+  { key: 'qf',    label: 'Quarter-finals', matchIds: range(97, 100)  },
+  { key: 'sf',    label: 'Semi-finals',    matchIds: [101, 102]      },
+  { key: 'third', label: '3rd Place',      matchIds: [103]           },
+  { key: 'final', label: 'Final',          matchIds: [104]           },
+];
+
+function BracketAccuracyTab({ participants, allPredictions, results }) {
+  const actualBracket = useMemo(
+    () => buildActualBracket(results.group || {}, results.ko || {}).bracket,
+    [results]
+  );
+
+  // Only show rounds where actual bracket has at least one team
+  const availableRounds = KO_ROUNDS.filter(r =>
+    r.matchIds.some(mId => actualBracket[mId]?.home || actualBracket[mId]?.away)
+  );
+
+  const [selectedRound, setSelectedRound] = useState(() => availableRounds[0]?.key || 'r32');
+
+  const round = KO_ROUNDS.find(r => r.key === selectedRound) || KO_ROUNDS[0];
+
+  // Get all team-slot pairs for actual bracket this round
+  const actualSlots = useMemo(() => {
+    const slots = {};
+    round.matchIds.forEach(mId => {
+      const m = actualBracket[mId] || {};
+      if (m.home) slots[`${mId}-home`] = m.home;
+      if (m.away) slots[`${mId}-away`] = m.away;
+    });
+    return slots;
+  }, [round, actualBracket]);
+
+  const actualTeamSet = new Set(Object.values(actualSlots));
+  const totalActual = actualTeamSet.size;
+
+  // Per-participant accuracy
+  const rows = useMemo(() => {
+    return participants.map(name => {
+      const preds = allPredictions[name] || {};
+      const userBracket = buildBracket(preds.group || {}, preds.ko || {}).bracket;
+
+      const userSlots = {};
+      round.matchIds.forEach(mId => {
+        const m = (userBracket[mId] || actualBracket[mId]) || {};
+        if (m.home) userSlots[`${mId}-home`] = m.home;
+        if (m.away) userSlots[`${mId}-away`] = m.away;
+      });
+      const userTeamSet = new Set(Object.values(userSlots));
+
+      let exact = 0, inRound = 0;
+      Object.entries(actualSlots).forEach(([slot, team]) => {
+        if (userSlots[slot] === team) {
+          exact++;
+        } else if (userTeamSet.has(team)) {
+          inRound++;
+        }
+      });
+      const missed = totalActual - exact - inRound;
+      return { name, exact, inRound, missed };
+    }).sort((a, b) => b.exact - a.exact || b.inRound - a.inRound);
+  }, [participants, allPredictions, round, actualSlots, actualBracket, totalActual]);
+
+  if (availableRounds.length === 0) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-soft)', fontSize: 14, fontStyle: 'italic' }}>
+        Bracket accuracy will be available once the knockout stage begins.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <label className="micro-caps">Round</label>
+        <select value={selectedRound} onChange={e => setSelectedRound(e.target.value)}
+          style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line)', background: 'var(--paper)', color: 'var(--ink)' }}>
+          {availableRounds.map(r => (
+            <option key={r.key} value={r.key}>{r.label}</option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+          {totalActual} team{totalActual !== 1 ? 's' : ''} confirmed
+        </span>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 12 }}>
+        <span><span style={{ color: 'var(--forest)', fontWeight: 700 }}>■</span> Exact — right team, right slot</span>
+        <span><span style={{ color: 'var(--amber)', fontWeight: 700 }}>■</span> In round — right team, wrong slot</span>
+        <span><span style={{ color: 'var(--line)', fontWeight: 700 }}>■</span> Missed</span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {rows.map((r, i) => {
+          const exactPct = totalActual > 0 ? (r.exact / totalActual) * 100 : 0;
+          const inRoundPct = totalActual > 0 ? (r.inRound / totalActual) * 100 : 0;
+          return (
+            <div key={r.name} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 28, textAlign: 'center', fontWeight: 700, color: 'var(--ink-soft)', fontSize: 13, flexShrink: 0 }}>
+                {i + 1}
+              </div>
+              <div style={{ minWidth: 100, fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
+                {r.name}
+              </div>
+              {/* Stacked bar */}
+              <div style={{ flex: 1, height: 18, background: 'var(--cream-2)', borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
+                <div style={{ width: `${exactPct}%`, background: 'var(--forest)', transition: 'width 0.4s' }} />
+                <div style={{ width: `${inRoundPct}%`, background: 'var(--amber)', transition: 'width 0.4s' }} />
+              </div>
+              {/* Counts */}
+              <div style={{ display: 'flex', gap: 10, fontSize: 12, flexShrink: 0 }}>
+                <span style={{ color: 'var(--forest)', fontWeight: 700 }}>{r.exact} ✓</span>
+                <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{r.inRound} ~</span>
+                <span style={{ color: 'var(--ink-soft)' }}>{r.missed} ✗</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FieldView({ participants, allPredictions, profiles, eliminatedTeams = [], results = {} }) {
+  const [fieldTab, setFieldTab] = useState('bonus');
+
   const total = participants.length;
 
   // Tally bonus picks
@@ -6281,6 +6411,22 @@ function FieldView({ participants, allPredictions, profiles, eliminatedTeams = [
         title="The Field"
         subtitle="How everyone has predicted — distributions across all picks."
       />
+
+      {/* Sub-tabs */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line)', marginBottom: 20, marginTop: 8 }}>
+        {[{ key: 'bonus', label: '🎯 Bonus Picks' }, { key: 'bracket', label: '⚽ Bracket Accuracy' }].map(t => (
+          <button key={t.key} onClick={() => setFieldTab(t.key)}
+            style={{ background: 'none', border: 'none', borderBottom: `2px solid ${fieldTab === t.key ? 'var(--burgundy)' : 'transparent'}`, padding: '8px 16px', fontWeight: fieldTab === t.key ? 700 : 400, color: fieldTab === t.key ? 'var(--ink)' : 'var(--ink-soft)', cursor: 'pointer', fontSize: 14 }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {fieldTab === 'bracket' && (
+        <BracketAccuracyTab participants={participants} allPredictions={allPredictions} results={results} />
+      )}
+
+      {fieldTab === 'bonus' && (<>
 
       {/* Completion summary */}
       <div className="card" style={{ padding: 16, marginTop: 18, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
@@ -6382,6 +6528,8 @@ function FieldView({ participants, allPredictions, profiles, eliminatedTeams = [
           <TiebreakDotPlot participants={participants} allPredictions={allPredictions} total={total} />
         </div>
       </div>
+
+      </>)}
     </div>
   );
 }
