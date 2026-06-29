@@ -1512,16 +1512,36 @@ const computeUserScore = (userPreds, actualGroupResults, actualKoResults, actual
 
   // Score bracket — full pts if exact match AND exact side; half pts if in round but different position
   // R32: use userR32Bracket (direct from standings, side-aware)
+  // KEY: bracket pts are triggered when the USER'S PREDICTED MATCH result is entered,
+  //      checking R32 qualification from group standings (not requiring team's match to be played)
+  const fullActualR32SlotByTeam = {};
   for (let mId = 73; mId <= 88; mId++) {
+    const slot = R32_SLOTS[mId];
+    let home = null, away = null;
+    if (slot.home.type === '1' && actualCompleteGroups.has(slot.home.g)) home = actualStandings[slot.home.g]?.[0]?.team;
+    else if (slot.home.type === '2' && actualCompleteGroups.has(slot.home.g)) home = actualStandings[slot.home.g]?.[1]?.team;
+    else if (slot.home.type === '3' && actualAllComplete) { const g = actualSlotToGroup[mId]; home = g ? actualStandings[g]?.[2]?.team : null; }
+    home = home || actualKoResults[mId]?.homeTeam || null;
+    if (slot.away.type === '1' && actualCompleteGroups.has(slot.away.g)) away = actualStandings[slot.away.g]?.[0]?.team;
+    else if (slot.away.type === '2' && actualCompleteGroups.has(slot.away.g)) away = actualStandings[slot.away.g]?.[1]?.team;
+    else if (slot.away.type === '3' && actualAllComplete) { const g = actualSlotToGroup[mId]; away = g ? actualStandings[g]?.[2]?.team : null; }
+    away = away || actualKoResults[mId]?.awayTeam || null;
+    if (home) fullActualR32SlotByTeam[home] = { matchId: mId, side: 'home' };
+    if (away) fullActualR32SlotByTeam[away] = { matchId: mId, side: 'away' };
+  }
+
+  for (let mId = 73; mId <= 88; mId++) {
+    const r32r = actualKoResults[mId];
+    if (!r32r || r32r.h == null || r32r.h === '') continue; // gate on THIS match's result being entered
     const v = SCORING.bracketTeam.R32;
     const { home: uHome, away: uAway } = userR32Bracket[mId] || {};
     let pts = 0;
     [{ team: uHome, side: 'home' }, { team: uAway, side: 'away' }].forEach(({ team, side }) => {
       if (!team) return;
-      const actual = actualMatchByTeamByRound.R32?.[team];
-      if (!actual) return; // didn't reach R32
-      if (actual.matchId === mId && actual.side === side) pts += v;        // exact slot + side
-      else pts += v * SCORING.halfMultiplier;                               // in R32, different position
+      const actualSlot = fullActualR32SlotByTeam[team];
+      if (!actualSlot) return;                                                   // team not in R32
+      if (actualSlot.matchId === mId && actualSlot.side === side) pts += v;     // exact slot + side
+      else pts += v * SCORING.halfMultiplier;                                    // in R32, different position
     });
     bracketPoints += pts;
     koRoundPts.R32 = (koRoundPts.R32 || 0) + pts;
@@ -1620,7 +1640,7 @@ const computeUserScore = (userPreds, actualGroupResults, actualKoResults, actual
     }
 
     koPoints += pts;
-    const round = ROUND_FOR(mId);
+    const round = mId >= 73 && mId <= 88 ? 'R32' : ROUND_FOR(mId);
     if (round) koRoundPts[round] = (koRoundPts[round] || 0) + pts;
   }
 
@@ -1717,64 +1737,54 @@ const computeMaxPossible = (userPreds, currentTotal, actualKoResults, actualBonu
 // Compute bracket bonus pts attributable to a specific match card
 // Iterates over ACTUAL teams in the match, checks against user's predicted rounds
 const computeMatchBracketPts = (matchId, userBracket, actualDerivedBracket, actualKoResults) => {
-  const round = ROUND_FOR(matchId);
+  const isR32 = matchId >= 73 && matchId <= 88;
+  const round = isR32 ? 'R32' : ROUND_FOR(matchId);
   if (!round || !SCORING.bracketTeam[round]) return 0;
   const fullValue = SCORING.bracketTeam[round];
 
-  // Actual teams for this specific match
-  const m = actualDerivedBracket[matchId];
-  const r = actualKoResults[matchId];
-  const actualHome = m?.home || r?.homeTeam;
-  const actualAway = m?.away || r?.awayTeam;
-  if (!actualHome && !actualAway) return 0;
+  // Iterate over USER'S predicted teams for this slot (not actual teams)
+  const uHome = userBracket[matchId]?.home;
+  const uAway = userBracket[matchId]?.away;
 
-  // User's teams by round (same structure as computeUserScore)
-  const userTeamsByRound = {
-    R32: new Set(), R16: new Set(), QF: new Set(), SF: new Set(), Final: new Set(), '3rd': new Set(),
-  };
-  for (let mId = 73; mId <= 88; mId++) { const bm = userBracket[mId]; if (bm?.home) userTeamsByRound.R32.add(bm.home); if (bm?.away) userTeamsByRound.R32.add(bm.away); }
-  for (let mId = 89; mId <= 96; mId++) { const bm = userBracket[mId]; if (bm?.home) userTeamsByRound.R16.add(bm.home); if (bm?.away) userTeamsByRound.R16.add(bm.away); }
-  for (let mId = 97; mId <= 100; mId++) { const bm = userBracket[mId]; if (bm?.home) userTeamsByRound.QF.add(bm.home); if (bm?.away) userTeamsByRound.QF.add(bm.away); }
-  for (let mId = 101; mId <= 102; mId++) { const bm = userBracket[mId]; if (bm?.home) userTeamsByRound.SF.add(bm.home); if (bm?.away) userTeamsByRound.SF.add(bm.away); }
-  if (userBracket[104]?.home) userTeamsByRound.Final.add(userBracket[104].home);
-  if (userBracket[104]?.away) userTeamsByRound.Final.add(userBracket[104].away);
-  if (userBracket[103]?.home) userTeamsByRound['3rd'].add(userBracket[103].home);
-  if (userBracket[103]?.away) userTeamsByRound['3rd'].add(userBracket[103].away);
-
-  // R32 slot types (for wrong-place detection)
-  const userSlotType = {}, actualSlotType = {};
-  for (let mId = 73; mId <= 88; mId++) {
-    const slot = R32_SLOTS[mId];
-    const um = userBracket[mId];
-    const am = actualDerivedBracket[mId];
-    const ar = actualKoResults[mId];
-    const aHome = am?.home || ar?.homeTeam;
-    const aAway = am?.away || ar?.awayTeam;
-    if (um?.home) userSlotType[um.home] = slot.home.type;
-    if (um?.away) userSlotType[um.away] = slot.away.type;
-    if (aHome) actualSlotType[aHome] = slot.home.type;
-    if (aAway) actualSlotType[aAway] = slot.away.type;
-  }
-
-  // Score: for each actual team in this match, how many pts does the user earn?
-  let pts = 0;
-  [actualHome, actualAway].forEach(team => {
-    if (!team) return;
-    if (userTeamsByRound[round]?.has(team)) {
-      if (round === 'R32') {
-        const uType = userSlotType[team];
-        const aType = actualSlotType[team];
-        pts += (uType === aType) ? fullValue : fullValue * SCORING.halfMultiplier;
-      } else {
-        pts += fullValue;
-      }
-    } else {
-      // Team not in user's predicted round — half pts if in any other round
-      const inAnyRound = Object.values(userTeamsByRound).some(s => s.has(team));
-      if (inAnyRound) pts += fullValue * SCORING.halfMultiplier;
+  if (isR32) {
+    // R32: check against full actual R32 bracket (known from group stages, not match results)
+    const actualR32SlotByTeam = {};
+    for (let mId = 73; mId <= 88; mId++) {
+      const home = actualDerivedBracket[mId]?.home || actualKoResults[mId]?.homeTeam;
+      const away = actualDerivedBracket[mId]?.away || actualKoResults[mId]?.awayTeam;
+      if (home) actualR32SlotByTeam[home] = { matchId: mId, side: 'home' };
+      if (away) actualR32SlotByTeam[away] = { matchId: mId, side: 'away' };
     }
-  });
-  return pts;
+    let pts = 0;
+    [{ team: uHome, side: 'home' }, { team: uAway, side: 'away' }].forEach(({ team, side }) => {
+      if (!team) return;
+      const actualSlot = actualR32SlotByTeam[team];
+      if (!actualSlot) return;
+      if (actualSlot.matchId === matchId && actualSlot.side === side) pts += fullValue;
+      else pts += fullValue * SCORING.halfMultiplier;
+    });
+    return pts;
+  } else {
+    // R16+: teams only confirmed once their match result is entered
+    const roundIds = round === 'R16' ? range(89,96) : round === 'QF' ? range(97,100) :
+      round === 'SF' ? [101,102] : round === '3rd' ? [103] : [104];
+    const actualMatchByTeam = {};
+    roundIds.forEach(mId => {
+      const home = actualKoResults[mId]?.homeTeam || actualDerivedBracket[mId]?.home;
+      const away = actualKoResults[mId]?.awayTeam || actualDerivedBracket[mId]?.away;
+      if (home) actualMatchByTeam[home] = { matchId: mId, side: 'home' };
+      if (away) actualMatchByTeam[away] = { matchId: mId, side: 'away' };
+    });
+    let pts = 0;
+    [{ team: uHome, side: 'home' }, { team: uAway, side: 'away' }].forEach(({ team, side }) => {
+      if (!team) return;
+      const actual = actualMatchByTeam[team];
+      if (!actual) return;
+      if (actual.matchId === matchId && actual.side === side) pts += fullValue;
+      else pts += fullValue * SCORING.halfMultiplier;
+    });
+    return pts;
+  }
 };
 
 
@@ -2687,7 +2697,7 @@ function SimulatorView({ participants, allPredictions, results, profiles, curren
 
   return (
     <div>
-      <SectionHeader kicker="Monte Carlo · 20,000 simulations" title="Tournament Simulator"
+      <SectionHeader kicker={'Monte Carlo · 20,000 simulations'} title="Tournament Simulator"
         subtitle="Win probability estimates based on an Elo model from FIFA rankings. Updated by admin after each set of results." />
 
       {loading && (
@@ -2707,7 +2717,7 @@ function SimulatorView({ participants, allPredictions, results, profiles, curren
       {!loading && simData && (
         <div className="fadein">
           <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 12, marginBottom: 16 }}>
-            {simData.N?.toLocaleString()} simulations · after {simData.afterResults} match results
+            {simData.N?.toLocaleString()} simulations {' · '} after {simData.afterResults} match results
             {simData.runAt ? ' · ' + new Date(simData.runAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : ''}
             {simData.elapsed ? ' · took ' + (simData.elapsed/1000).toFixed(1) + 's' : ''}
           </div>
@@ -2786,7 +2796,7 @@ function SimulatorView({ participants, allPredictions, results, profiles, curren
             </table>
           </div>
           <div style={{ fontSize:11, color:'var(--ink-soft)', textAlign:'right', marginBottom:16 }}>
-            Elo model from FIFA rankings · team-based Golden Boot matching
+            {'Elo model from FIFA rankings · team-based Golden Boot matching'}
           </div>
         </div>
       )}
@@ -3133,6 +3143,60 @@ function MatchPicksView({ participants, allPredictions, results, selected, setSe
     return ab;
   }, [results]);
 
+  // Compute bracket pts for a single participant for a specific KO match
+  const ROUND_BONUS_MAP = { R32: 4, R16: 4, QF: 6, SF: 8, Final: 10, '3rd': 4 };
+  const ROUND_IDS = {
+    R32: range(73,88), R16: range(89,96), QF: range(97,100),
+    SF: [101,102], '3rd': [103], Final: [104]
+  };
+
+  const computeMatchBracketPts = (mId, userPreds) => {
+    const isR32 = mId >= 73 && mId <= 88;
+    const round = isR32 ? 'R32' : ROUND_FOR(mId);
+    if (!round || !SCORING.bracketTeam[round]) return 0;
+    const fullValue = SCORING.bracketTeam[round];
+    const { bracket: userBracket } = buildBracket(userPreds.group || {}, userPreds.ko || {});
+    const uHome = userBracket[mId]?.home;
+    const uAway = userBracket[mId]?.away;
+    if (isR32) {
+      const actualR32SlotByTeam = {};
+      for (let id = 73; id <= 88; id++) {
+        const home = actualBracket[id]?.home || (results.ko||{})[id]?.homeTeam;
+        const away = actualBracket[id]?.away || (results.ko||{})[id]?.awayTeam;
+        if (home) actualR32SlotByTeam[home] = { matchId: id, side: 'home' };
+        if (away) actualR32SlotByTeam[away] = { matchId: id, side: 'away' };
+      }
+      let pts = 0;
+      [{ team: uHome, side: 'home' }, { team: uAway, side: 'away' }].forEach(({ team, side }) => {
+        if (!team) return;
+        const slot = actualR32SlotByTeam[team];
+        if (!slot) return;
+        if (slot.matchId === mId && slot.side === side) pts += fullValue;
+        else pts += fullValue * SCORING.halfMultiplier;
+      });
+      return pts;
+    } else {
+      const roundIds = round === 'R16' ? range(89,96) : round === 'QF' ? range(97,100) :
+        round === 'SF' ? [101,102] : round === '3rd' ? [103] : [104];
+      const actualMatchByTeam = {};
+      roundIds.forEach(id => {
+        const home = (results.ko||{})[id]?.homeTeam || actualBracket[id]?.home;
+        const away = (results.ko||{})[id]?.awayTeam || actualBracket[id]?.away;
+        if (home) actualMatchByTeam[home] = { matchId: id, side: 'home' };
+        if (away) actualMatchByTeam[away] = { matchId: id, side: 'away' };
+      });
+      let pts = 0;
+      [{ team: uHome, side: 'home' }, { team: uAway, side: 'away' }].forEach(({ team, side }) => {
+        if (!team) return;
+        const actual = actualMatchByTeam[team];
+        if (!actual) return;
+        if (actual.matchId === mId && actual.side === side) pts += fullValue;
+        else pts += fullValue * SCORING.halfMultiplier;
+      });
+      return pts;
+    }
+  };
+
   const matchTeams = (mId, isKo) => {
     if (!isKo) {
       const m = GROUP_MATCHES.find(gm => gm.id === mId);
@@ -3192,7 +3256,8 @@ function MatchPicksView({ participants, allPredictions, results, selected, setSe
                     </div>
                   </button>
                   {isSel && <MatchDetailPanel mId={mId} isKo={isKo} home={home} away={away}
-                    actual={actual} hasResult={hasResult} participants={participants} allPredictions={allPredictions} />}
+                    actual={actual} hasResult={hasResult} participants={participants} allPredictions={allPredictions}
+                    computeBracketPts={isKo ? computeMatchBracketPts : null} />}
                 </div>
               );
             })}
@@ -3211,17 +3276,20 @@ function MatchPicksView({ participants, allPredictions, results, selected, setSe
   );
 }
 
-function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participants, allPredictions }) {
+function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participants, allPredictions, computeBracketPts }) {
   const rows = useMemo(() => {
     return participants.map(p => {
       const preds = allPredictions[p] || {};
       const pred = isKo ? (preds.ko||{})[mId] : (preds.group||{})[mId];
       const hasPred = pred && pred.h !== '' && pred.h != null && pred.a !== '' && pred.a != null;
-      let pts = 0, isExact = false;
+      let pts = 0, bracketPts = 0, isExact = false;
       if (hasResult && hasPred) {
         const scored = scoreMatch(pred, actual, home, away, !isKo);
         pts = scored.total;
         isExact = parseInt(pred.h) === parseInt(actual.h) && parseInt(pred.a) === parseInt(actual.a);
+      }
+      if (hasResult && computeBracketPts) {
+        bracketPts = computeBracketPts(mId, preds);
       }
       // For KO matches, derive the user's predicted teams for this slot from their bracket
       let predHome = null, predAway = null;
@@ -3230,9 +3298,9 @@ function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participan
         predHome = userBracket[mId]?.home || null;
         predAway = userBracket[mId]?.away || null;
       }
-      return { name:p, pred, hasPred, pts, isExact, predHome, predAway };
-    }).sort((a,b) => hasResult ? (b.pts - a.pts || a.name.localeCompare(b.name)) : a.name.localeCompare(b.name));
-  }, [participants, allPredictions, mId, isKo, actual, hasResult, home, away]);
+      return { name:p, pred, hasPred, pts, bracketPts, isExact, predHome, predAway };
+    }).sort((a,b) => hasResult ? ((b.pts + b.bracketPts) - (a.pts + a.bracketPts) || a.name.localeCompare(b.name)) : a.name.localeCompare(b.name));
+  }, [participants, allPredictions, mId, isKo, actual, hasResult, home, away, computeBracketPts]);
 
   const exactCount = rows.filter(r => r.isExact).length;
 
@@ -3247,7 +3315,7 @@ function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participan
         </span>
       </div>
       <div style={{ padding:'0 16px 10px' }}>
-        {rows.map(({ name, pred, hasPred, pts, isExact, predHome, predAway }) => (
+        {rows.map(({ name, pred, hasPred, pts, bracketPts, isExact, predHome, predAway }) => (
           <div key={name} style={{ borderBottom:'1px solid var(--line-soft)', padding:'7px 0' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -3256,18 +3324,25 @@ function MatchDetailPanel({ mId, isKo, home, away, actual, hasResult, participan
                 </span>
                 <span style={{ fontSize:13, fontWeight:isExact?700:400 }}>{name}</span>
               </div>
-              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                 {!isKo && (
                   <span style={{ fontSize:14, fontWeight:700, color:'var(--forest)', fontVariantNumeric:'tabular-nums', minWidth:40, textAlign:'center' }}>
                     {hasPred ? pred.h+'–'+pred.a : <span style={{ color:'var(--ink-soft)', fontStyle:'italic', fontSize:12 }}>—</span>}
                   </span>
                 )}
-                {!isKo && !hasPred && (
-                  <span style={{ fontSize:12, color:'var(--ink-soft)', fontStyle:'italic', minWidth:40, textAlign:'center' }}>—</span>
-                )}
-                {hasResult && (
+                {hasResult && hasPred && (
                   <span className={'pill '+(pts>0?'pill-success':'')} style={{ fontSize:11, minWidth:32, textAlign:'center' }}>
-                    {pts > 0 ? '+'+pts : '0'}
+                    {pts > 0 ? '+'+pts : '0'} <span style={{ fontWeight:400, opacity:0.7 }}>score</span>
+                  </span>
+                )}
+                {hasResult && bracketPts > 0 && (
+                  <span className="pill" style={{ fontSize:11, background:'rgba(212,167,60,0.15)', borderColor:'var(--amber)', color:'var(--amber)', minWidth:32, textAlign:'center' }}>
+                    +{bracketPts} <span style={{ fontWeight:400, opacity:0.8 }}>bracket</span>
+                  </span>
+                )}
+                {hasResult && hasPred && bracketPts === 0 && isKo && (
+                  <span className="pill" style={{ fontSize:11, background:'var(--cream-2)', borderColor:'var(--line)', color:'var(--ink-soft)', minWidth:32, textAlign:'center' }}>
+                    0 <span style={{ fontWeight:400 }}>bracket</span>
                   </span>
                 )}
               </div>
@@ -4924,16 +4999,35 @@ function BracketView({ predictions, onSave, results, locked }) {
       userR32Bracket[mId] = { home, away };
     }
 
-    // Score R32 — full pts if exact match AND exact side; half pts if in round but different position
+    // Build full actual R32 slot map from group standings (not gated by match results)
+    const fullActualR32SlotByTeam = {};
     for (let mId = 73; mId <= 88; mId++) {
+      const slot = R32_SLOTS[mId];
+      let home = null, away = null;
+      if (slot.home.type === '1' && aComplete.has(slot.home.g)) home = aStandings[slot.home.g]?.[0]?.team;
+      else if (slot.home.type === '2' && aComplete.has(slot.home.g)) home = aStandings[slot.home.g]?.[1]?.team;
+      else if (slot.home.type === '3' && aAllDone) { const g = aSlotToGroup[mId]; home = g ? aStandings[g]?.[2]?.team : null; }
+      home = home || koResults[mId]?.homeTeam || null;
+      if (slot.away.type === '1' && aComplete.has(slot.away.g)) away = aStandings[slot.away.g]?.[0]?.team;
+      else if (slot.away.type === '2' && aComplete.has(slot.away.g)) away = aStandings[slot.away.g]?.[1]?.team;
+      else if (slot.away.type === '3' && aAllDone) { const g = aSlotToGroup[mId]; away = g ? aStandings[g]?.[2]?.team : null; }
+      away = away || koResults[mId]?.awayTeam || null;
+      if (home) fullActualR32SlotByTeam[home] = { matchId: mId, side: 'home' };
+      if (away) fullActualR32SlotByTeam[away] = { matchId: mId, side: 'away' };
+    }
+
+    // Score R32 — triggered by USER'S predicted match result, not team's actual match
+    for (let mId = 73; mId <= 88; mId++) {
+      const r32r = koResults[mId];
+      if (!r32r || r32r.h == null || r32r.h === '') continue; // gate on THIS match's result
       const v = SCORING.bracketTeam.R32;
       const { home: uHome, away: uAway } = userR32Bracket[mId] || {};
       let pts = 0;
       [{ team: uHome, side: 'home' }, { team: uAway, side: 'away' }].forEach(({ team, side }) => {
         if (!team) return;
-        const actual = actualMatchByTeamByRound.R32?.[team];
-        if (!actual) return;
-        if (actual.matchId === mId && actual.side === side) pts += v;
+        const actualSlot = fullActualR32SlotByTeam[team];
+        if (!actualSlot) return;
+        if (actualSlot.matchId === mId && actualSlot.side === side) pts += v;
         else pts += v * SCORING.halfMultiplier;
       });
       if (pts > 0) map[mId] = pts;
@@ -6210,7 +6304,7 @@ function TiebreakDotPlot({ participants, allPredictions, total }) {
   return (
     <>
       <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 12 }}>
-        {times.length} of {total} submitted · earliest: <strong>{times[0].time}</strong> · latest: <strong>{times[times.length - 1].time}</strong>
+        {times.length} of {total} submitted {' · '} earliest: <strong>{times[0].time}</strong> {' · '} latest: <strong>{times[times.length - 1].time}</strong>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         {times.map(({ name, time }) => {
@@ -6322,9 +6416,9 @@ function BracketAccuracyTab({ participants, allPredictions, results }) {
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 12 }}>
-        <span><span style={{ color: 'var(--forest)', fontWeight: 700 }}>■</span> Exact — right team, right slot</span>
-        <span><span style={{ color: 'var(--amber)', fontWeight: 700 }}>■</span> In round — right team, wrong slot</span>
-        <span><span style={{ color: 'var(--line)', fontWeight: 700 }}>■</span> Missed</span>
+        <span><span style={{ color: 'var(--forest)', fontWeight: 700 }}>{'■'}</span>{' Exact \u2014 right team, right slot'}</span>
+        <span><span style={{ color: 'var(--amber)', fontWeight: 700 }}>{'■'}</span>{' In round \u2014 right team, wrong slot'}</span>
+        <span><span style={{ color: 'var(--line)', fontWeight: 700 }}>{'■'}</span>{' Missed'}</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -6346,9 +6440,9 @@ function BracketAccuracyTab({ participants, allPredictions, results }) {
               </div>
               {/* Counts */}
               <div style={{ display: 'flex', gap: 10, fontSize: 12, flexShrink: 0 }}>
-                <span style={{ color: 'var(--forest)', fontWeight: 700 }}>{r.exact} ✓</span>
-                <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{r.inRound} ~</span>
-                <span style={{ color: 'var(--ink-soft)' }}>{r.missed} ✗</span>
+                <span style={{ color: 'var(--forest)', fontWeight: 700 }}>{r.exact} {'✓'}</span>
+                <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{r.inRound} {'~'}</span>
+                <span style={{ color: 'var(--ink-soft)' }}>{r.missed} {'✗'}</span>
               </div>
             </div>
           );
